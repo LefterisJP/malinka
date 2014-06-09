@@ -1,0 +1,76 @@
+#+TITLE: Malinka
+#+DESCRIPTION: A C/C++ project configuration package for Emacs
+
+* Information
+Malinka is a project management Emacs package for C/C++
+
+It uses rtags to help the user jump around the code easily and without the
+mistaken tag jumping that other taggers frequently have with C/C++ code.
+The main functionality that malinka provides is to properly populate and communicate the
+compiler commands to the rtags daemons depending on the project you are working
+on.
+
+Optionally and if you also have flycheck with the clang syntax-checker activated
+malinka will communicate to flycheck's clang syntax checker the appropriate
+cpp-defines and include paths so that flycheck can do its syntax checking.
+
+If you have not installed rtags yet, visit their [[https://github.com/Andersbakken/rtags][github page]] and read more information
+about how you can acquire and use rtags. Alternatively if you used [[https://github.com/dimitri/el-get][el-get]] to get malinka
+rtags should have been downloaded and built as a dependency
+
+The way to define a project is by using `malinka-define-project' and to provide
+the basic attributes that a project needs.  For more information you can read
+the function's docstring.
+
+* Examples
+Working with malinka requires that you define your project somewhere in your emacs
+file using `malinka-define-project'.
+#+BEGIN_SRC emacs-lisp
+(require 'malinka)
+
+
+(malinka-define-project
+ :name "Refulib"
+ :cpp-defines '("REFU_COMPILING" "REFU_LINUX_VERSION" "REFU_TEST"
+                "RF_MODULE_DF_XML" "RF_MODULE_DS_ARRAY" "RF_MODULE_DS_BARRAY"
+                "RF_MODULE_DS_LIST" "RF_MODULE_IO" "RF_MODULE_IO_TEXTFILE"
+                "RF_MODULE_REGEX" "RF_MODULE_STRINGS" "RF_MODULE_SYSTEM"
+                "RF_MODULE_THREAD" "RF_MODULE_THREADX" "RF_MODULE_TIME_DATE"
+                "RF_MODULE_TIME_TIMER" "RF_OPTION_DEFAULT_ARGUMENTS"
+                "RF_OPTION_FGETS_READ_BYTESN=512" "RF_OPTION_FILE_ADDBOM"
+                "RF_OPTION_LIST_CAPACITY_M=2"
+                "RF_OPTION_LOCALSTACKMEMORY_SIZE=1048576"
+                "RF_OPTION_REGEX_NODES_ALLOCMULTIPLIER=4"
+                "RF_OPTION_REGEX_STACKSIZE=250"
+                "RF_OPTION_STRINGX_CAPACITY_M=2"
+                "RF_OPTION_THREADX_MSGQUEUE=10" "RF_OPTION_VERBOSE_ERRORS"
+                "_FILE_OFFSET_BITS=64" "_GNU_SOURCE" "_LARGEFILE64_SOURCE"
+                "RF_MODULE_LIST_EXTRA" "RF_MODULE_LIST")
+ :include-dirs '("/home/lefteris/w/Refulib/include")
+ :root-directory "~/w/Refulib")
+     #+END_SRC
+
+In the above example we can see a sample definition of a project. The name should 
+always be the same as the file-name of the directory where the project is located.
+
+The rest of the arguments are self-explanatory. Attention should be brought to the
+`root-directory' argument. In combination with the `same-name-check' argument they define
+2 different ways to view a project.
+
+If `same-name-check' is non nil then even if a file of the same project is visited
+the c/c++ configuration will be regenerated. That is useful in situations where 
+multiple versions of a project exist in different directories. 
+
+Having `same-name-check' nil in those cases allows us to simultaneously develop on
+the different versions of the project which reside in the different directories and
+keep different defines and include directories for each. By default the value is true.
+
+In cases where `same-name-check' is true it also makes sense to provide the
+`root-directory' of the project as in the above example.
+
+* Issues
+If you have problems, bugs or feature requests feel free to open an issue in github
+and I will take a look at it when I find the time.
+* Contribution
+All contributions are welcome. If you would like to help you can open a pull request with your suggested contribution.
+
