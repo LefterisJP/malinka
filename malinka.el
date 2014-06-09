@@ -4,10 +4,10 @@
 ;; Copyright © 2014 Lefteris Karapetsas <lefteris@refu.co>
 ;;
 ;; Author: Lefteris Karapetsas <lefteris@refu.co>
-;; URL: TODO
+;; URL: https://github.com/LefterisJP/malinka
 ;; Keywords: c c++ project-management
 ;; Version: 0.1
-;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (pkg-info "0.4") (cl-lib "0.3") (emacs "24.1"))
+;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (cl-lib "0.3") (rtags "?") (emacs "24.1"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -93,7 +93,7 @@ nil
 (defvar malinka-include-dirs '()
   "The current project's compiler include directories.")
 (defvar malinka-ignored-directories '(".git" ".hg")
-  "These directories will be ignored during filesearch.")
+  "These directories will be ignored during file search.")
 
 ; --- Helper Macros ---
 
