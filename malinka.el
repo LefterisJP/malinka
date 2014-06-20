@@ -305,18 +305,34 @@ No need to reinvent the wheel."
 
 ;;; --- rtags integration ---
 (defun malinka-rtags-invoke-with (&rest args)
-"Invoke rc (rtags executable) with ARGS as arguments.
+  "Invoke rc (rtags executable) with ARGS as arguments.
 
 Returns the output of the command as a string or nil in case of error"
-  (let* ((rc (rtags-executable-find "rc"))
-         (cmd (s-join " " (cons rc args))))
-    (when rc
-      (shell-command-to-string cmd))))
+  (when (malinka-rtags-assert-rdm-runs)
+    (let* ((rc (rtags-executable-find "rc"))
+           (cmd (s-join " " (cons rc args))))
+      (when rc
+        (shell-command-to-string cmd)))))
+
 
 (defun malinka-rtags-file-indexed-p (filename)
   "Ask rtags if it knows about FILENAME."
   (let ((output (s-trim (malinka-rtags-invoke-with "--is-indexed" filename))))
     (string-equal output "indexed")))
+
+(defun malinka-rtags-assert-rdm-runs ()
+  "Assert that the rtags daemon is running."
+  ; if the process has been messed with by outside sources clean it up
+  (let ((status (process-status rtags-process)))
+    (when (memq status '(exit signal closed failed))
+      (delete-process rtags-process)
+      (setq rtags-process nil)
+      (when (get-buffer "*rdm*")
+        (kill-buffer "*rdm*"))))
+  (if (rtags-start-process-maybe)
+      t
+      ;else
+      (malinka-error "Could not find rtags daemon in the system")))
 
 
 ;;; --- Functions related to creating the compilation database ---
@@ -391,9 +407,10 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
 (defun malinka-project-map-update-compiledb (project-map root-dir)
   "Update the compilation database for PROJECT-MAP and ROOT-DIR."
   (malinka-project-compiledb-create project-map root-dir)
-  (with-temp-buffer
-    (rtags-call-rc "-W" root-dir)
-    (rtags-call-rc "-J" root-dir)))
+  (when (malinka-rtags-assert-rdm-runs)
+    (with-temp-buffer
+      (rtags-call-rc "-W" root-dir)
+      (rtags-call-rc "-J" root-dir))))
 
 
 
