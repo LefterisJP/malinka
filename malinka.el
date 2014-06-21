@@ -6,8 +6,8 @@
 ;; Author: Lefteris Karapetsas <lefteris@refu.co>
 ;; URL: https://github.com/LefterisJP/malinka
 ;; Keywords: c c++ project-management
-;; Version: 0.1
-;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (cl-lib "0.3") (rtags "?") (emacs "24.1"))
+;; Version: 0.1.0
+;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (cl-lib "0.3") (rtags "") (projectile "0.11.0")
 
 ;; This file is NOT part of GNU Emacs.
 
