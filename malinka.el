@@ -542,31 +542,31 @@ knows about this additional include directory."
     (when (string= malinka-current-project-name name)
       (setq flycheck-clang-include-path includes))))
 
-(when (require 'flycheck nil 'noerror)
+(eval-after-load 'flycheck
+  (progn
+    (defun malinka-flycheck-clang-interface()
+      "Configure flycheck clang's syntax checker according to what we know."
+      (with-current-buffer (current-buffer)
+        (let* ((project-root (malinka-project-detect-root))
+               (project-name (malinka-project-name-from-root project-root)))
+          (when (malinka-configure-project-p project-name)
+            (setq malinka-current-project-name project-name)
+            (let ((includes-res
+                   (malinka-process-relative-dirs
+                    (malinka-project-name-get include-dirs project-name)
+                    project-root))
+                  (cppflags-res (malinka-project-name-get cpp-defines project-name)))
+              (if includes-res
+                  (setq malinka-include-dirs includes-res)
+                (setq malinka-include-dirs '()))
+              (if cppflags-res
+                  (setq malinka-macro-cppflags cppflags-res)
+                (setq malinka-macro-cppflags '()))))
+          ;; whether we switched project or not assert modules are configured
+          (setq flycheck-clang-definitions malinka-macro-cppflags)
+          (setq flycheck-clang-include-path malinka-include-dirs))))
 
-  (defun malinka-flycheck-clang-interface()
-    "Configure flycheck clang's syntax checker according to what we know."
-    (with-current-buffer (current-buffer)
-      (let* ((project-root (malinka-project-detect-root))
-             (project-name (malinka-project-name-from-root project-root)))
-        (when (malinka-configure-project-p project-name)
-          (setq malinka-current-project-name project-name)
-          (let ((includes-res
-                 (malinka-process-relative-dirs
-                  (malinka-project-name-get include-dirs project-name)
-                  project-root))
-                (cppflags-res (malinka-project-name-get cpp-defines project-name)))
-            (if includes-res
-                (setq malinka-include-dirs includes-res)
-              (setq malinka-include-dirs '()))
-            (if cppflags-res
-                (setq malinka-macro-cppflags cppflags-res)
-              (setq malinka-macro-cppflags '()))))
-        ;; whether we switched project or not assert modules are configured
-        (setq flycheck-clang-definitions malinka-macro-cppflags)
-        (setq flycheck-clang-include-path malinka-include-dirs))))
-
-  (add-hook 'flycheck-before-syntax-check-hook 'malinka-flycheck-clang-interface))
+    (add-hook 'flycheck-before-syntax-check-hook 'malinka-flycheck-clang-interface)))
 
 (provide 'malinka)
 ;;; malinka.el ends here
