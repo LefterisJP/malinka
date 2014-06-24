@@ -120,6 +120,7 @@ and I will take a look at it when I find the time.
 ** Common Issues
 
 - *Can't index file*
+
   To get a view of the connection between Emacs and the rtags daemon you can always
   check the =*rdm*= buffer. There you can see after a ~M-x malinka-project-configure~
   if the files are indexed properly.
