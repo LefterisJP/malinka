@@ -116,6 +116,23 @@ via the following interactive API:
 * Issues
 If you have problems, bugs or feature requests feel free to open an issue in [[https://github.com/LefterisJP/malinka/issues][github]]
 and I will take a look at it when I find the time.
+
+** Common Issues
+
+- *Can't index file*
+  To get a view of the connection between Emacs and the rtags daemon you can always
+  check the =*rdm*= buffer. There you can see after a ~M-x malinka-project-configure~
+  if the files are indexed properly.
+
+  If for some reason a file can't be indexed and in the =*rdm= buffer you get
+  something like below:
+  #+BEGIN_SRC sh
+  Failed to make location from [filename:line:column]
+  #+END_SRC
+  Then I would suggest removing the rtags cache kept under =~/.rtags= by default
+  and then redoing a ~M-x malinka-project-configure~. For now this is the only
+  solution. If a better solution is found it will be documented here.
+
 * Contribution
 All contributions are welcome. If you would like to help you can open a pull request with your suggested contribution.
 

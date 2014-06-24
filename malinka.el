@@ -324,9 +324,10 @@ Returns the output of the command as a string or nil in case of error"
 (defun malinka-rtags-assert-rdm-runs ()
   "Assert that the rtags daemon is running."
   ; if the process has been messed with by outside sources clean it up
-  (let ((status (process-status rtags-process)))
-    (when (memq status '(exit signal closed failed))
-      (delete-process rtags-process)
+  (let ((status (if rtags-process (process-status rtags-process) nil)))
+    (when (or (not status) (memq status '(exit signal closed failed)))
+      (when rtags-process
+        (delete-process rtags-process))
       (setq rtags-process nil)
       (when (get-buffer "*rdm*")
         (kill-buffer "*rdm*"))))
@@ -499,8 +500,6 @@ knows about this additional include directory."
                        (read-directory-name "Project root: "))))
      (list include project-name given-dir)))
   (let ((map (assoc project-name malinka-projects-map)))
-    (message "LDEL: include-dir: %s given-root-dir: %s project name: %s"
-             include-dir  given-root-dir project-name)
     (malinka-update-project-map map :include-dirs include-dir)
     (malinka-project-map-update-compiledb map given-root-dir)
     (malinka-update-flycheck-include-dirs map)))
