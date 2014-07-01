@@ -95,6 +95,8 @@ nil
   "The current project's compiler include directories.")
 (defvar malinka-ignored-directories '(".git" ".hg")
   "These directories will be ignored during file search.")
+(defvar malinka-supported-compilers '("gcc" "cc" "g++" "clang")
+"Compiler executable names that are recognized and supported by malinka.")
 
 ; --- Helper Macros ---
 
@@ -190,7 +192,9 @@ is basically any directory except known ignored directories"
                                  (compiler-flags '())
                                  (include-dirs '())
                                  (root-directory nil)
-                                 (same-name-check t))
+                                 (same-name-check t)
+                                 (makefile nil)
+                                 (makecmd nil))
 "Define a c/c++ project named NAME.
 
 NAME should be the same as the file-name of the root-directory of the project
@@ -222,6 +226,10 @@ true.
 The project is added to the global `malinka-projects-map'
 "
 (unless (stringp name) (malinka-error "Provided non-string for project name"))
+(unless (or (not makefile) (stringp makefile))
+  (malinka-error "Provided non-string for project makefile"))
+(unless (or (not makecmd) (stringp makecmd))
+  (malinka-error "Provided non-string for the project's make command"))
 (unless (or (not compiler-executable) (f-executable? compiler-executable))
   (malinka-error "Can't find compiler executable \"%s\"" compiler-executable))
 (when root-directory
@@ -245,7 +253,9 @@ The project is added to the global `malinka-projects-map'
                           (cpp-defines . ,cpp-defines)
                           (include-dirs . ,include-dirs)
                           (root-directory . ,root-directory)
-                          (same-name-check . ,same-name-check)))))
+                          (same-name-check . ,same-name-check)
+                          (makefile . ,makefile)
+                          (makecmd . ,makecmd)))))
 
 (defun* malinka-update-project-map  (map &key
                                          (cpp-defines '())
@@ -260,15 +270,19 @@ The project is added to the global `malinka-projects-map'
          (name (malinka-project-map-get name map))
          (compiler-executable (malinka-project-map-get compiler-executable map))
          (root-directory (malinka-project-map-get root-directory map))
-         (same-name-check (malinka-project-map-get same-name-check map)))
-  (add-to-list 'malinka-projects-map
-               `(,name . ((name . ,name)
-                          (compiler-executable . ,compiler-executable)
-                          (compiler-flags . ,new-compiler-flags)
-                          (cpp-defines . ,new-cpp-defines)
-                          (include-dirs . ,new-include-dirs)
-                          (root-directory . ,root-directory)
-                          (same-name-check . ,same-name-check))))))
+         (same-name-check (malinka-project-map-get same-name-check map))
+         (makefile (malinka-project-map-get makefile map))
+         (makecmd (malinka-project-map-get makecmd map)))
+    (add-to-list 'malinka-projects-map
+                 `(,name . ((name . ,name)
+                            (compiler-executable . ,compiler-executable)
+                            (compiler-flags . ,new-compiler-flags)
+                            (cpp-defines . ,new-cpp-defines)
+                            (include-dirs . ,new-include-dirs)
+                            (root-directory . ,root-directory)
+                            (same-name-check . ,same-name-check)
+                            (makefile . ,makefile)
+                            (makecmd . ,makecmd))))))
 
 
 (defun malinka-defined-project-names ()
@@ -360,8 +374,27 @@ Returns the output of the command as a string or nil in case of error"
               (s-append ".o " (f-no-ext file))
               file)))
 
+(defun malinka-project-create-json-list (project-map
+                                         files-list
+                                         root-dir)
+"Create the json association list for this project.
 
-(defun malinka-create-json-representation (files-list project-map given-root-dir)
+Read the PROJECT-MAP and use the FILES-LIST and all the attributes
+of a project to create the commands.
+Finally ROOT-DIR determines the root directory to write to the file."
+    (-map
+     (lambda (item)
+       (let* ((command-string
+               (malinka-project-command-from-map
+                project-map item)))
+         (json-encode-alist
+          `((directory . ,root-dir)
+            (command . ,command-string)
+            (file . ,item))))) files-list))
+
+(defun malinka-create-json-representation (files-list
+                                           project-map
+                                           given-root-dir)
 "Return the json representation that should go into the compilation DB.
 
 The contents are defined by reading all the relevant files from the
@@ -370,22 +403,25 @@ from the PROJECT-MAP.
 
 If there is a GIVEN-ROOT-DIR then this is used instead of the one taken
 from the project map"
-(let ((root-dir
+(let* ((root-dir
         (if given-root-dir
-           given-root-dir
-         (f-canonical (cdr (assoc 'root-directory (cdr project-map)))))))
+            given-root-dir
+          (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
+       (processed-list (malinka-buildcmd-process project-map root-dir)))
+
+  ;; if we got build commands from the makefile update the project map
+  (when processed-list
+    (malinka-update-project-map project-map
+                                :cpp-defines (car processed-list)
+                                :include-dirs (nth 1 processed-list)
+                                :compiler-flags (nth 2 processed-list)))
+
   ; build an association list with all the data for each file
   ; json-encode does not seem to work for a list of dicts, so we
   ; have to build it manually
-  (let ((json-list (-map
-                    (lambda (item)
-                      (let* ((command-string
-                              (malinka-project-command-from-map
-                               project-map item)))
-                        (json-encode-alist
-                         `((directory . ,root-dir)
-                           (command . ,command-string)
-                           (file . ,item))))) files-list)))
+  (let ((json-list (malinka-project-create-json-list project-map
+                                                     files-list
+                                                     root-dir)))
     (format "[\n%s\n]" (s-join
                         ",\n" (-map 'malinka-json-escape-paths json-list))))))
 
@@ -426,6 +462,88 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
   (when (-contains? (malinka-defined-project-names) name)
     name)))
 
+
+; --- Makefile/Build command reading ---
+(defun malinka-buildcmd-line-get-file (line)
+"Process a LINE of a build command and determine the file being compiled."
+  (let* ((words (s-split " " line))
+         (last-word (car (last words))))
+    (if (malinka-file-p last-word)
+        last-word
+      ;else
+      (progn
+        (malinka-error "Could not determine the file compiled by:\n%s"
+                     line)
+        nil))))
+
+
+(defun malinka-buildcmd-line-begins-with-compile (line)
+  "Determine wether LINE begins with a compile command.
+If it does return the list of 'words' contained in the line.
+If not return nil."
+  (let* ((words (s-split " " line))
+         (first-word (car words)))
+    (if (-contains? malinka-supported-compilers first-word)
+        words
+      nil)))
+
+(defun malinka-add-if-not-existing (list elem ind &rest vars)
+"Add to LIST the ELEM at IND if not existing.
+
+Return VARS list if existing and if not existing the list plus the element
+at IND.
+TODO: Could be a macro?"
+  (if (-contains? list elem)
+      vars
+    ;;else
+    (-replace-at ind elem vars)))
+
+
+(defun malinka-buildcmd-process-word (input-list word)
+  "Read the INPUT-LIST and process the WORD of a compile command."
+  (let ((cpp-defines (car input-list))
+        (include-dirs (nth 1 input-list))
+        (compiler-flags (nth 2 input-list)))
+    (cond
+     ((s-starts-with? "-D" word)
+      (let ((cpp-define (s-chop-prefix "-D" word)))
+        (malinka-add-if-not-existing cpp-defines cpp-define
+                                     0 cpp-defines include-dirs compiler-flags)))
+     ((s-starts-with? "-I" word)
+      (let ((include-dir (s-chop-prefix "-I" word)))
+        (malinka-add-if-not-existing include-dirs include-dir
+                                     1 cpp-defines include-dirs compiler-flags)))
+     (:else
+      ;; All other choices would be compiler flags
+      (malinka-add-if-not-existing compiler-flags word
+                                   2 cpp-defines include-dirs compiler-flags)))))
+
+(defun malinka-buildcmd-process-line (input-list line)
+  "Read the INPUT-LIST and if LINE is a compile command, process it."
+  (let ((words (malinka-buildcmd-line-begins-with-compile line)))
+    (if words
+        (-reduce-from 'malinka-buildcmd-process-word input-list words)
+      ;; else return unchanged
+      input-list)))
+
+(defun malinka-buildcmd-process (project-map root-dir)
+  "Read the build commands from a project's makefile.
+
+Read the PROJECT-MAP and ROOT-DIR combination thas has a makefile
+and returns a list of lists.  This is in the form of:
+'(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS)"
+  (let* ((makefile (malinka-project-map-get makefile project-map))
+         (makecmd (malinka-project-map-get makecmd project-map))
+         (cmd-output
+          (shell-command-to-string (format "cd %s && %s -n" root-dir makecmd))))
+    ;; get the compile commands from the output
+    (let ((lines (s-lines cmd-output)))
+      (-reduce-from
+       'malinka-buildcmd-process-line
+       '((malinka-project-map-get cpp-defines project-map)
+         (malinka-project-map-get include-dirs project-map)
+         (malinka-project-map-get compiler-flags project-map))
+       lines))))
 
 
 (defun malinka-read-project (prompt &optional default)
