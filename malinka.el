@@ -97,6 +97,8 @@ nil
   "These directories will be ignored during file search.")
 (defvar malinka-supported-compilers '("gcc" "cc" "g++" "clang")
 "Compiler executable names that are recognized and supported by malinka.")
+(defvar malinka-supported-file-types '("c" "cc" "cpp" "tcc")
+"Source files that malinka would search for in a project.")
 
 ; --- Helper Macros ---
 
@@ -257,16 +259,28 @@ The project is added to the global `malinka-projects-map'
                           (makefile . ,makefile)
                           (makecmd . ,makecmd)))))
 
+
+(defun malinka-list-add-list-or-elem (list elem)
+  "Add element to LIST.
+
+ELEM can be either a single element or another list"
+  (if (listp elem)
+      (append elem list)
+      (cons elem list)))
+
 (defun* malinka-update-project-map  (map &key
                                          (cpp-defines '())
                                          (compiler-flags '())
                                          (include-dirs '()))
   (let* ((new-cpp-defines
-          (cons cpp-defines (malinka-project-map-get cpp-defines map)))
+          (malinka-list-add-list-or-elem
+           cpp-defines (malinka-project-map-get cpp-defines map)))
          (new-include-dirs
-          (cons include-dirs (malinka-project-map-get include-dirs map)))
+          (malinka-list-add-list-or-elem
+           include-dirs (malinka-project-map-get include-dirs map)))
          (new-compiler-flags
-          (cons compiler-flags (malinka-project-map-get compiler-flags map)))
+          (malinka-list-add-list-or-elem
+           compiler-flags (malinka-project-map-get compiler-flags map)))
          (name (malinka-project-map-get name map))
          (compiler-executable (malinka-project-map-get compiler-executable map))
          (root-directory (malinka-project-map-get root-directory map))
@@ -490,13 +504,12 @@ If not return nil."
 (defun malinka-add-if-not-existing (list elem ind &rest vars)
 "Add to LIST the ELEM at IND if not existing.
 
-Return VARS list if existing and if not existing the list plus the element
-at IND.
-TODO: Could be a macro?"
+Return VARS list if existing and if not existing returns the VARS
+list with ELEM appended to the IND sublist."
   (if (-contains? list elem)
       vars
     ;;else
-    (-replace-at ind elem vars)))
+    (-replace-at ind (cons elem (nth ind vars)) vars)))
 
 
 (defun malinka-buildcmd-process-word (input-list word)
@@ -513,6 +526,13 @@ TODO: Could be a macro?"
       (let ((include-dir (s-chop-prefix "-I" word)))
         (malinka-add-if-not-existing include-dirs include-dir
                                      1 cpp-defines include-dirs compiler-flags)))
+     ((s-ends-with? ".o" word)
+      ;; ignore object files
+      input-list)
+     ((malinka-file-p word)
+      ;; If it's a source file ignore for now
+      ;; TODO: Populate the file list from here
+      input-list)
      (:else
       ;; All other choices would be compiler flags
       (malinka-add-if-not-existing compiler-flags word
@@ -540,9 +560,9 @@ and returns a list of lists.  This is in the form of:
     (let ((lines (s-lines cmd-output)))
       (-reduce-from
        'malinka-buildcmd-process-line
-       '((malinka-project-map-get cpp-defines project-map)
-         (malinka-project-map-get include-dirs project-map)
-         (malinka-project-map-get compiler-flags project-map))
+       `(,(malinka-project-map-get cpp-defines project-map)
+         ,(malinka-project-map-get include-dirs project-map)
+         ,(malinka-project-map-get compiler-flags project-map))
        lines))))
 
 
