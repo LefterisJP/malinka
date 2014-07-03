@@ -1,0 +1,26 @@
+TARGET = test_project
+LIBS = -lm
+CC = gcc
+CFLAGS = -g -Wall
+IDIRS = -I/nice/include/path/ -I/good/include/path
+DEFINES = -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
+
+.PHONY: default all clean
+
+default: $(TARGET)
+all: default
+
+OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
+HEADERS = $(wildcard *.h)
+
+%.o: %.c $(HEADERS)
+	$(CC) $(CFLAGS) $(IDIRS) $(DEFINES)-c $< -o $@
+
+.PRECIOUS: $(TARGET) $(OBJECTS)
+
+$(TARGET): $(OBJECTS)
+	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
+
+clean:
+	-rm -f *.o
+	-rm -f $(TARGET)
