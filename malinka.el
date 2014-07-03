@@ -511,6 +511,15 @@ list with ELEM appended to the IND sublist."
     ;;else
     (-replace-at ind (cons elem (nth ind vars)) vars)))
 
+(defun malinka-buildcmd-ignore-argument-p (arg)
+  "Return true if ARG of the build command should be ignored."
+  (or
+   ;; ignore object files
+   (s-ends-with? ".o" arg)
+   ;; ignore -o argument
+   (equal "-o" arg)
+   ;; ignore -c argument
+   (equal "-c" arg)))
 
 (defun malinka-buildcmd-process-word (input-list word)
   "Read the INPUT-LIST and process the WORD of a compile command."
@@ -522,17 +531,26 @@ list with ELEM appended to the IND sublist."
       (let ((cpp-define (s-chop-prefix "-D" word)))
         (malinka-add-if-not-existing cpp-defines cpp-define
                                      0 cpp-defines include-dirs compiler-flags)))
+
      ((s-starts-with? "-I" word)
       (let ((include-dir (s-chop-prefix "-I" word)))
         (malinka-add-if-not-existing include-dirs include-dir
                                      1 cpp-defines include-dirs compiler-flags)))
-     ((s-ends-with? ".o" word)
-      ;; ignore object files
+
+     ((malinka-buildcmd-ignore-argument-p word)
       input-list)
+
      ((malinka-file-p word)
       ;; If it's a source file ignore for now
       ;; TODO: Populate the file list from here
       input-list)
+
+     ((-contains? malinka-supported-compilers word)
+      ;; If it's a compiler argument (should be first)
+      ;; then this should help us determine the compiler.
+      ;; TODO: but .. for now ignore
+      input-list)
+
      (:else
       ;; All other choices would be compiler flags
       (malinka-add-if-not-existing compiler-flags word

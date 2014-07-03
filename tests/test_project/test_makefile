@@ -14,7 +14,7 @@ OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
 HEADERS = $(wildcard *.h)
 
 %.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) $(IDIRS) $(DEFINES)-c $< -o $@
+	$(CC) $(CFLAGS) $(IDIRS) $(DEFINES) -c $< -o $@
 
 .PRECIOUS: $(TARGET) $(OBJECTS)
 
