@@ -248,6 +248,11 @@ The project is added to the global `malinka-projects-map'
   (malinka-error
    "Provided non all-string list for project \"%s\" includes" name))
 
+  ;; to avoid some association list problems
+  ;; delete it if it already exists before redefining
+  (when (assoc name malinka-projects-map)
+      (malinka-delete-project name))
+
   (add-to-list 'malinka-projects-map
                `(,name . ((name . ,name)
                           (compiler-executable . ,compiler-executable)
@@ -258,6 +263,10 @@ The project is added to the global `malinka-projects-map'
                           (same-name-check . ,same-name-check)
                           (makefile . ,makefile)
                           (makecmd . ,makecmd)))))
+
+(defun malinka-delete-project (name)
+  "Delete project NAME from the projects map."
+  (setq malinka-projects-map (assq-delete-all name malinka-projects-map)))
 
 
 (defun malinka-list-add-list-or-elem (list elem)
@@ -287,6 +296,9 @@ ELEM can be either a single element or another list"
          (same-name-check (malinka-project-map-get same-name-check map))
          (makefile (malinka-project-map-get makefile map))
          (makecmd (malinka-project-map-get makecmd map)))
+    ;; first delete the project from the project list
+    (malinka-delete-project name)
+    ;; then add the updated project
     (add-to-list 'malinka-projects-map
                  `(,name . ((name . ,name)
                             (compiler-executable . ,compiler-executable)
@@ -421,7 +433,7 @@ from the project map"
         (if given-root-dir
             given-root-dir
           (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
-       (processed-list (malinka-buildcmd-process project-map root-dir)))
+       (processed-list (malinka-buildcmd-process project-map root-dir files-list)))
 
   ;; if we got build commands from the makefile update the project map
   (when processed-list
@@ -525,24 +537,29 @@ list with ELEM appended to the IND sublist."
   "Read the INPUT-LIST and process the WORD of a compile command."
   (let ((cpp-defines (car input-list))
         (include-dirs (nth 1 input-list))
-        (compiler-flags (nth 2 input-list)))
+        (compiler-flags (nth 2 input-list))
+        (files-list (nth 3 input-list)))
     (cond
      ((s-starts-with? "-D" word)
       (let ((cpp-define (s-chop-prefix "-D" word)))
         (malinka-add-if-not-existing cpp-defines cpp-define
-                                     0 cpp-defines include-dirs compiler-flags)))
+                                     0 cpp-defines include-dirs
+                                     compiler-flags files-list)))
 
      ((s-starts-with? "-I" word)
       (let ((include-dir (s-chop-prefix "-I" word)))
         (malinka-add-if-not-existing include-dirs include-dir
-                                     1 cpp-defines include-dirs compiler-flags)))
+                                     1 cpp-defines include-dirs
+                                     compiler-flags files-list)))
 
-     ((malinka-buildcmd-ignore-argument-p word)
-      input-list)
 
      ((malinka-file-p word)
-      ;; If it's a source file ignore for now
-      ;; TODO: Populate the file list from here
+      ;; If it's a source file add it to the file-list
+        (malinka-add-if-not-existing files-list word
+                                     3 cpp-defines include-dirs
+                                     compiler-flags files-list))
+
+     ((malinka-buildcmd-ignore-argument-p word)
       input-list)
 
      ((-contains? malinka-supported-compilers word)
@@ -554,22 +571,34 @@ list with ELEM appended to the IND sublist."
      (:else
       ;; All other choices would be compiler flags
       (malinka-add-if-not-existing compiler-flags word
-                                   2 cpp-defines include-dirs compiler-flags)))))
+                                   2 cpp-defines include-dirs
+                                   compiler-flags files-list)))))
+
+(defun malinka-buildcmd-line-link-cmd-p (words)
+  "Return t if the line comprised of WORDS is a linking related cmd.
+
+The logic is that if no source file is found in the command then it's a linking
+command.  Maybe a better way could be devised ..."
+  (not (-any? 'malinka-file-p words)))
+
 
 (defun malinka-buildcmd-process-line (input-list line)
   "Read the INPUT-LIST and if LINE is a compile command, process it."
   (let ((words (malinka-buildcmd-line-begins-with-compile line)))
-    (if words
+    (if (and words (not (malinka-buildcmd-line-link-cmd-p words)))
         (-reduce-from 'malinka-buildcmd-process-word input-list words)
       ;; else return unchanged
       input-list)))
 
-(defun malinka-buildcmd-process (project-map root-dir)
+(defun malinka-buildcmd-process (project-map root-dir &optional files-list)
   "Read the build commands from a project's makefile.
 
 Read the PROJECT-MAP and ROOT-DIR combination thas has a makefile
-and returns a list of lists.  This is in the form of:
-'(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS)"
+and returns a list of lists.  Optionally if we want to have a starting
+FILES-LIST it can be provided as an argument.
+
+The returned list has the form:
+'(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS FILES-LIST)"
   (let* ((makefile (malinka-project-map-get makefile project-map))
          (makecmd (malinka-project-map-get makecmd project-map))
          (cmd-output
@@ -580,7 +609,8 @@ and returns a list of lists.  This is in the form of:
        'malinka-buildcmd-process-line
        `(,(malinka-project-map-get cpp-defines project-map)
          ,(malinka-project-map-get include-dirs project-map)
-         ,(malinka-project-map-get compiler-flags project-map))
+         ,(malinka-project-map-get compiler-flags project-map)
+         ,files-list)
        lines))))
 
 
