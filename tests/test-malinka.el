@@ -34,6 +34,11 @@
   (should (malinka-test-contained-lists-equal? exp-list result-list)))
 
 
+(defun malinka-test-form-build-cmd (dir command file)
+  "Form a build command for DIR COMMAND and FILE."
+  (format "{\"directory\":\"%s\", \"command\":\"%s\", \"file\":\"%s\"}"
+          dir command file))
+
 
 ;; -- Test Malinka's utility functions
 (ert-deftest malinka-test/list-add-list-or-elem/add-list ()
@@ -81,8 +86,17 @@ test can start with a clean project-map."
 (ert-deftest malinka-test/create-json-representation ()
   (malinka-test/setup-buildcmd-test-project
    (let ((json (malinka-create-json-representation nil map root-dir)))
-     ;;TODO
-     (message "-----------\n%s\n" json))))
+     (should (equal
+              json
+              (format "[\n%s,\n%s\n]"
+                      (malinka-test-form-build-cmd
+                       "./test_project/"
+                       "/usr/bin/gcc -c -o boo.o boo.c"
+                       "boo.c")
+                      (malinka-test-form-build-cmd
+                       "./test_project/"
+                       "/usr/bin/gcc -c -o foo.o foo.c"
+                       "foo.c")))))))
 
 
 (provide 'test-malinka)

@@ -60,6 +60,12 @@
 
 
 ;;; --- Customizable variables ---
+(defgroup malinka nil
+  "An Emacs c/c++ project manager"
+  :group 'tools ;; Emacs -> Programming -> tools
+  :prefix "malinka-"
+  :link '(url-link :tag "Github" "https://github.com/LefterisJP/malinka"))
+
 (defcustom malinka-completion-system nil
   "The completion system to use.
 
@@ -85,20 +91,59 @@ nil
   :group 'malinka
   :type '(choice (const :tag "IDO" ido)
                  (const :tag "Completing read" nil))
-  :package-version '(malinka . "0.1"))
+  :package-version '(malinka . "0.1.0"))
 
+(defcustom malinka-ignored-directories '(".git" ".hg")
+  "A list of directories to ignore for file searching."
+  :group 'malinka
+  :type '(repeat (string :tag "Ignored directory"))
+  :safe #'malinka-string-list-p
+  :package-version '(malinka . "0.2.0"))
+
+(defcustom malinka-supported-compilers '("gcc" "cc" "g++" "clang")
+"Compiler executable names that are recognized and supported by malinka."
+  :group 'malinka
+  :type '(repeat (string :tag "Supported compilers"))
+  :safe #'malinka-string-list-p
+  :package-version '(malinka . "0.2.0"))
+
+(defcustom malinka-supported-file-types '("c" "cc" "cpp" "tcc")
+"File extensions that malinka will treat as related source files."
+  :group 'malinka
+  :type '(repeat (string :tag "Supported file types"))
+  :safe #'malinka-string-list-p
+  :package-version '(malinka . "0.2.0"))
+
+(defcustom malinka-files-list-populator 'build-and-recursive
+"Decides how malinka will populate the files list of a project.
+
+`recursive'
+     Populates the files-list of a project by recursively searching
+     inside the root-directory of the project and gathering all files
+     whose extension is a member of `malinka-supported-file-types'.
+
+`build-cmd'
+     Populates the files-list of a project by using the `makecmd'
+     argument and trying to determine the files by parsing the
+     make commands.
+
+`build-and-recursive'
+     Populates the files-list of a project by combining the behaviour
+     of both `recursive' and `build-cmd.' This is the default."
+  :group 'malinka
+  :type '(choice (const :tag "Recursive file search" recursive)
+                 (const :tag "Build command file search" build-cmd)
+                 (const :tag "Build command and recursive file search"
+                        build-and-recursive))
+  :package-version '(malinka . "0.2.0"))
+
+;;; --- Global project variables ---
 
 (defvar malinka-current-project-name nil)
 (defvar malinka-projects-map '())
 (defvar malinka-macro-cppflags '() "The current project's cpp flags.")
 (defvar malinka-include-dirs '()
   "The current project's compiler include directories.")
-(defvar malinka-ignored-directories '(".git" ".hg")
-  "These directories will be ignored during file search.")
-(defvar malinka-supported-compilers '("gcc" "cc" "g++" "clang")
-"Compiler executable names that are recognized and supported by malinka.")
-(defvar malinka-supported-file-types '("c" "cc" "cpp" "tcc")
-"Source files that malinka would search for in a project.")
 
 ; --- Helper Macros ---
 
@@ -172,11 +217,8 @@ the current project."
         t))))
 
 (defun malinka-file-p (file)
-"Return non-nil only if the FILE is related to C/C++."
-(or (f-ext? file "c")
-    (f-ext? file "cpp")
-    (f-ext? file "cc")
-    (f-ext? file "tcc")))
+  "Return non-nil only if the FILE is related to C/C++."
+  (-contains? malinka-supported-file-types (f-ext file)))
 
 (defun malinka-file-dir-p (file)
 "Return true if FILE is a file or directory of interest.
@@ -390,11 +432,8 @@ Returns the output of the command as a string or nil in case of error"
         (include-dirs (malinka-project-map-get include-dirs project-map))
         (executable (malinka-project-map-get compiler-executable project-map)))
     (s-concat executable
-              " "
               (s-join " " compiler-flags)
-              " "
               (s-join " " (--map (s-prepend "-D" it) cpp-defines))
-              " "
               (s-join " " (--map (s-prepend "-I" it) include-dirs))
               " -c -o "
               (s-append ".o " (f-no-ext file))
@@ -433,7 +472,8 @@ from the project map"
         (if given-root-dir
             given-root-dir
           (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
-       (processed-list (malinka-buildcmd-process project-map root-dir files-list)))
+       (processed-list (malinka-buildcmd-process project-map root-dir files-list))
+       (updated-files-list (if processed-list (nth 3 processed-list) files-list)))
 
   ;; if we got build commands from the makefile update the project map
   (when processed-list
@@ -446,10 +486,19 @@ from the project map"
   ; json-encode does not seem to work for a list of dicts, so we
   ; have to build it manually
   (let ((json-list (malinka-project-create-json-list project-map
-                                                     files-list
+                                                     updated-files-list
                                                      root-dir)))
     (format "[\n%s\n]" (s-join
                         ",\n" (-map 'malinka-json-escape-paths json-list))))))
+
+(defun malinka-project-recursive-file-search (root-dir)
+  "Find all c/c++ files under ROOT-DIR.
+
+If `malinka-files-list-populator' is `build-cmd' then no search is
+performed."
+  (unless (eq malinka-files-list-populator 'build-cmd))
+    (--filter (not (f-dir? it))
+              (f--entries root-dir (malinka-file-dir-p it) t)))
 
 (defun malinka-project-compiledb-create (project-map root-dir)
   "Create a json compile database for the PROJECT-MAP.
@@ -457,9 +506,7 @@ from the project map"
 Creates the configuration for NAME with ROOT-DIR.
 For more information on the compilations database please refer here:
 http://clang.llvm.org/docs/JSONCompilationDatabase.html"
-  (let* ((project-files
-          (--filter (not (f-dir? it))
-                    (f--entries root-dir (malinka-file-dir-p it) t)))
+  (let* ((project-files (malinka-project-recursive-file-search root-dir))
          (db-file-name (f-join root-dir "compile_commands.json"))
          (json-string
           (malinka-create-json-representation
@@ -554,10 +601,11 @@ list with ELEM appended to the IND sublist."
 
 
      ((malinka-file-p word)
-      ;; If it's a source file add it to the file-list
+      ;; If it's a source file and config allows add it to the file-list
+      (unless (eq malinka-files-list-populator 'recursive)
         (malinka-add-if-not-existing files-list word
                                      3 cpp-defines include-dirs
-                                     compiler-flags files-list))
+                                     compiler-flags files-list)))
 
      ((malinka-buildcmd-ignore-argument-p word)
       input-list)
@@ -596,6 +644,9 @@ command.  Maybe a better way could be devised ..."
 Read the PROJECT-MAP and ROOT-DIR combination thas has a makefile
 and returns a list of lists.  Optionally if we want to have a starting
 FILES-LIST it can be provided as an argument.
+
+This function shoud only be called if we know the project-map contains
+a build command.
 
 The returned list has the form:
 '(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS FILES-LIST)"
