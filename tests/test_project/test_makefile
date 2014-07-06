@@ -10,7 +10,8 @@ DEFINES = -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
 default: $(TARGET)
 all: default
 
-OBJECTS = $(patsubst %.c, %.o, $(wildcard *.c))
+OBJECTS := $(patsubst %.c, %.o, $(wildcard *.c))
+OBJECTS := $(filter-out goo.o, $(OBJECTS))
 HEADERS = $(wildcard *.h)
 
 %.o: %.c $(HEADERS)

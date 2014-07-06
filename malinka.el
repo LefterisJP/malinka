@@ -196,6 +196,9 @@ nil
    (or (s-starts-with? "../" it) (s-starts-with? "./" it))
    (s-prepend project-root it) input-list))
 
+(defun malinka-file-make-absolute (root-dir file)
+  "Use ROOT-DIR to turn FILE into its absolute path version."
+  (f-join root-dir file))
 ;;; --- Predicate functions ---
 
 (defun malinka-string-list-p (obj)
@@ -585,27 +588,32 @@ list with ELEM appended to the IND sublist."
   (let ((cpp-defines (car input-list))
         (include-dirs (nth 1 input-list))
         (compiler-flags (nth 2 input-list))
-        (files-list (nth 3 input-list)))
+        (files-list (nth 3 input-list))
+        (root-dir (nth 4 input-list)))
     (cond
      ((s-starts-with? "-D" word)
       (let ((cpp-define (s-chop-prefix "-D" word)))
         (malinka-add-if-not-existing cpp-defines cpp-define
                                      0 cpp-defines include-dirs
-                                     compiler-flags files-list)))
+                                     compiler-flags files-list root-dir)))
 
      ((s-starts-with? "-I" word)
-      (let ((include-dir (s-chop-prefix "-I" word)))
+      (let ((include-dir
+             ;; TODO: think about include dirs and absolute or not
+             ;; (malinka-file-make-absolute root-dir (s-chop-prefix "-I" word))))
+             (s-chop-prefix "-I" word)))
         (malinka-add-if-not-existing include-dirs include-dir
                                      1 cpp-defines include-dirs
-                                     compiler-flags files-list)))
+                                     compiler-flags files-list root-dir)))
 
 
      ((malinka-file-p word)
-      ;; If it's a source file and config allows add it to the file-list
-      (unless (eq malinka-files-list-populator 'recursive)
-        (malinka-add-if-not-existing files-list word
-                                     3 cpp-defines include-dirs
-                                     compiler-flags files-list)))
+      (let ((file (malinka-file-make-absolute root-dir word)))
+        ;; If it's a source file and config allows add it to the file-list
+        (unless (eq malinka-files-list-populator 'recursive)
+          (malinka-add-if-not-existing files-list file
+                                       3 cpp-defines include-dirs
+                                       compiler-flags files-list root-dir))))
 
      ((malinka-buildcmd-ignore-argument-p word)
       input-list)
@@ -620,7 +628,7 @@ list with ELEM appended to the IND sublist."
       ;; All other choices would be compiler flags
       (malinka-add-if-not-existing compiler-flags word
                                    2 cpp-defines include-dirs
-                                   compiler-flags files-list)))))
+                                   compiler-flags files-list root-dir)))))
 
 (defun malinka-buildcmd-line-link-cmd-p (words)
   "Return t if the line comprised of WORDS is a linking related cmd.
@@ -661,7 +669,8 @@ The returned list has the form:
        `(,(malinka-project-map-get cpp-defines project-map)
          ,(malinka-project-map-get include-dirs project-map)
          ,(malinka-project-map-get compiler-flags project-map)
-         ,files-list)
+         ,files-list
+         ,root-dir)
        lines))))
 
 
