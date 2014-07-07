@@ -90,7 +90,7 @@ test can start with a clean project-map."
    (let ((result (malinka-buildcmd-process map root-dir)))
      (malinka-test-assert-contained-lists-equal
       result
-      `(("_GNU_SOURCE" "_FILE_OFFSET_BITS=64")
+      `(("_GNU_SOURCE" "_FILE_OFFSET_BITS=64" "STRING_VAL=\"malinka\"")
         ("/nice/include/path/" "/good/include/path")
         ("-g" "-Wall")
         (,(malinka-test-turn-to-absolute "test_project/foo.c")
@@ -104,15 +104,15 @@ test can start with a clean project-map."
               (format "[\n%s,\n%s\n]"
                       (malinka-test-form-build-cmd
                        "test_project"
-                       "foo.c"
+                       "boo.c"
                        '("-Wall" "-g")
-                       '("_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("STRING_VAL=\"malinka\"" "_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
                        '("/good/include/path" "/nice/include/path/"))
                       (malinka-test-form-build-cmd
                        "test_project"
-                       "boo.c"
+                       "foo.c"
                        '("-Wall" "-g")
-                       '("_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("STRING_VAL=\"malinka\"" "_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
                        '("/good/include/path" "/nice/include/path/"))))))))
 
 
@@ -126,7 +126,7 @@ test can start with a clean project-map."
                   (malinka-project-recursive-file-search root-dir))))
      (malinka-test-assert-contained-lists-equal
       result
-      `(("_GNU_SOURCE" "_FILE_OFFSET_BITS=64")
+      `(("STRING_VAL=\"malinka\"" "_GNU_SOURCE" "_FILE_OFFSET_BITS=64")
         ("/nice/include/path/" "/good/include/path")
         ("-g" "-Wall")
         (,(malinka-test-turn-to-absolute "test_project/foo.c")

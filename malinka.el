@@ -426,9 +426,10 @@ Returns the output of the command as a string or nil in case of error"
 
 ;;; --- Functions related to creating the compilation database ---
 
-(defun malinka-json-escape-paths (str)
-"Escape any directory separators in STR, for json encoding."
-  (s-replace "\\\/" "/" str))
+(defun malinka-json-format-escapes (str)
+"Unescapes/escape special characters before signing off a json encoded STR."
+  (s-replace "\\\"" "\"" (s-replace "\\\/" "/" str)))
+
 
 (defun malinka-project-command-from-map (project-map file)
 "Form the compile command for a PROJECT-MAP and a specific FILE."
@@ -498,7 +499,7 @@ from the project map"
                                                      updated-files-list
                                                      root-dir)))
     (format "[\n%s\n]" (s-join
-                        ",\n" (-map 'malinka-json-escape-paths json-list))))))
+                        ",\n" (-map 'malinka-json-format-escapes json-list))))))
 
 (defun malinka-project-recursive-file-search (root-dir)
   "Find all c/c++ files under ROOT-DIR.
@@ -652,6 +653,10 @@ command.  Maybe a better way could be devised ..."
       ;; else return unchanged
       input-list)))
 
+(defun malinka-build-cmd-to-str (build-cmd root-dir)
+"Turn the BUILD-CMD of project at ROOT-DIR into a string."
+(s-replace "\\\"" "\"" (shell-command-to-string (format "cd %s && %s -n" root-dir build-cmd))))
+
 (defun malinka-buildcmd-process (project-map root-dir &optional files-list)
   "Read the build commands from a project's makefile.
 
@@ -666,18 +671,17 @@ The returned list has the form:
 '(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS FILES-LIST)"
   (let ((build-cmd (malinka-project-map-get build-cmd project-map)))
     (when build-cmd
-      (let* ((cmd-output
-              (shell-command-to-string (format "cd %s && %s -n" root-dir build-cmd))))
-        ;; get the compile commands from the output
-        (let ((lines (s-lines cmd-output)))
-          (-reduce-from
-           'malinka-buildcmd-process-line
-           `(,(malinka-project-map-get cpp-defines project-map)
-             ,(malinka-project-map-get include-dirs project-map)
-             ,(malinka-project-map-get compiler-flags project-map)
-             ,files-list
-             ,root-dir)
-           lines))))))
+      (let* ((cmd-output (malinka-build-cmd-to-str build-cmd root-dir))
+             ;; get the compile commands from the output
+             (lines (s-lines cmd-output)))
+        (-reduce-from
+         'malinka-buildcmd-process-line
+         `(,(malinka-project-map-get cpp-defines project-map)
+           ,(malinka-project-map-get include-dirs project-map)
+           ,(malinka-project-map-get compiler-flags project-map)
+           ,files-list
+           ,root-dir)
+         lines)))))
 
 
 (defun malinka-read-project (prompt &optional default)
