@@ -26,7 +26,10 @@ the function's docstring.
 :CUSTOM_ID: example_setup
 :END:
 Working with malinka requires that you define your project somewhere in your emacs
-file using `malinka-define-project'.
+file using `malinka-define-project'. There are various way to define the attributes
+of a C/C++ project.
+
+** Manual Setup
 #+BEGIN_SRC emacs-lisp
 (require 'malinka)
 
@@ -55,7 +58,8 @@ file using `malinka-define-project'.
 In the above example we can see a sample definition of a project. The name should
 always be the same as the file-name of the directory where the project is located.
 
-The rest of the arguments are self-explanatory. Attention should be brought to the
+The rest of the arguments are self-explanatory. Scroll down for an even easier way
+to customize a proejct using a build-cmd. Attention should be brought to the
 `root-directory' argument. In combination with the `same-name-check' argument they define
 2 different ways to view a project.
 
@@ -69,19 +73,57 @@ keep different defines and include directories for each. By default the value is
 
 In cases where `same-name-check' is true it also makes sense to provide the
 `root-directory' of the project as in the above example.
-* Customization
-As a user you have a choice of the completion system to choose when selecting a defined project.
-As inspired by [[https://github.com/flycheck/flycheck][flycheck]]'s customization there are currently two choices offered:
-- [[http://www.emacswiki.org/emacs/InteractivelyDoThings][IDO]]: the built-in completion system with fuzzy searching. Powerful though it is, one can really
-improve it by using [[https://github.com/lewang/flx][flx-ido]].
 
-- [[http://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-Completion.html][Completing Read]]: The very simple and not fancy emacs built-in completion system. Is the default.
+** Automatic Setup
 
-To customize it put something like this in your init file
+A simpler way to define a project would be to provide a `root-directory and a
+`build-cmd'. This way malinka would attempt to parse the output of the build
+command and deduce all the project attributes. For example:
+
 #+BEGIN_SRC emacs-lisp
-(setq malinka-completion-system 'ido)
-     #+END_SRC
+(malinka-define-project
+ :name "foo project"
+ :build-cmd "make -f foo_project_makefile")
+#+END_SRC
 
+This way configuring the project is considerably easier and less manual
+but we are currently limited to using only Makefiles and no other build
+system. Support for other build systems should be available soon.
+* Customization
+As a user you have ample customization choices when using malinka. These are:
+- **malinka-completion-system**:
+  As a user you have a choice of the completion system to choose when selecting a defined project.
+  As inspired by [[https://github.com/flycheck/flycheck][flycheck]]'s customization there are currently two choices offered:
+    - [[http://www.emacswiki.org/emacs/InteractivelyDoThings][IDO]]: the built-in completion system with fuzzy searching. Powerful though it is, one can really
+      improve it by using [[https://github.com/lewang/flx][flx-ido]].
+
+    - [[http://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-Completion.html][Completing Read]]: The very simple and not fancy emacs built-in completion system. Is the default.
+
+- **malinka-ignored-directories**:
+  A list of directories to ignore for file searching
+
+- **malinka-supported-compilers**:
+  A list of compiler executable names that are recognized and supported by malinka.
+
+- **malinka-supported-file-types**:
+  File extensions that malinka will treat as related source files.
+
+- **malinka-files-list-populator**:
+  Decides how malinka will populate the files list of a project.
+
+    - `recursive'
+         Populates the files-list of a project by recursively searching
+         inside the root-directory of the project and gathering all files
+         whose extension is a member of `malinka-supported-file-types'.
+
+    - `build-cmd'
+         Populates the files-list of a project by using the `build-cmd'
+         argument and trying to determine the files by parsing the
+         make commands.
+
+    - `build-and-recursive'
+         Populates the files-list of a project by combining the behaviour
+         of both `recursive' and `build-cmd.' This is the default.
 * Usage
 As shown in the [[#example_setup][example setup]] section the basic configuration that needs to exist in order to use malinka is to define your
 projects using src_<emacs-lisp>{(malinka-define-project)}. Following that the way to interact with the defined projects is

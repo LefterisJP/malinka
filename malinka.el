@@ -101,7 +101,7 @@ nil
   :package-version '(malinka . "0.2.0"))
 
 (defcustom malinka-supported-compilers '("gcc" "cc" "g++" "clang")
-"Compiler executable names that are recognized and supported by malinka."
+"A list of compiler executable names that are recognized and supported by malinka."
   :group 'malinka
   :type '(repeat (string :tag "Supported compilers"))
   :safe #'malinka-string-list-p
@@ -123,7 +123,7 @@ nil
      whose extension is a member of `malinka-supported-file-types'.
 
 `build-cmd'
-     Populates the files-list of a project by using the `makecmd'
+     Populates the files-list of a project by using the `build-cmd'
      argument and trying to determine the files by parsing the
      make commands.
 
@@ -240,8 +240,7 @@ is basically any directory except known ignored directories"
                                  (include-dirs '())
                                  (root-directory nil)
                                  (same-name-check t)
-                                 (makefile nil)
-                                 (makecmd nil))
+                                 (build-cmd nil))
 "Define a c/c++ project named NAME.
 
 NAME should be the same as the file-name of the root-directory of the project
@@ -270,13 +269,14 @@ the different versions of the project which reside in the different directories 
 keep different defines and include directories for each. Be default it is set to
 true.
 
+A user can provide a `build-cmd' such as 'make -f target_makefile' for malinka
+to attempt to parse that and get all project attributes.
+
 The project is added to the global `malinka-projects-map'
 "
 (unless (stringp name) (malinka-error "Provided non-string for project name"))
-(unless (or (not makefile) (stringp makefile))
-  (malinka-error "Provided non-string for project makefile"))
-(unless (or (not makecmd) (stringp makecmd))
-  (malinka-error "Provided non-string for the project's make command"))
+(unless (or (not build-cmd) (stringp build-cmd))
+  (malinka-error "Provided non-string for the project's build command"))
 (unless (or (not compiler-executable) (f-executable? compiler-executable))
   (malinka-error "Can't find compiler executable \"%s\"" compiler-executable))
 (when root-directory
@@ -306,8 +306,7 @@ The project is added to the global `malinka-projects-map'
                           (include-dirs . ,include-dirs)
                           (root-directory . ,root-directory)
                           (same-name-check . ,same-name-check)
-                          (makefile . ,makefile)
-                          (makecmd . ,makecmd)))))
+                          (build-cmd . ,build-cmd)))))
 
 (defun malinka-delete-project (name)
   "Delete project NAME from the projects map."
@@ -340,11 +339,12 @@ ELEM can be either a single element or another list"
          (root-directory (malinka-project-map-get root-directory map))
          (same-name-check (malinka-project-map-get same-name-check map))
          (makefile (malinka-project-map-get makefile map))
-         (makecmd (malinka-project-map-get makecmd map)))
+         (build-cmd (malinka-project-map-get build-cmd map)))
     ;; first delete the project from the project list
     (malinka-delete-project name)
-    ;; then add the updated project
-    (add-to-list 'malinka-projects-map
+    ;; then add the updated project map to malinka projects
+    (setq malinka-projects-map
+          (add-to-list 'malinka-projects-map
                  `(,name . ((name . ,name)
                             (compiler-executable . ,compiler-executable)
                             (compiler-flags . ,new-compiler-flags)
@@ -353,7 +353,9 @@ ELEM can be either a single element or another list"
                             (root-directory . ,root-directory)
                             (same-name-check . ,same-name-check)
                             (makefile . ,makefile)
-                            (makecmd . ,makecmd))))))
+                            (build-cmd . ,build-cmd)))))
+    ;; return the updated project map
+    (assoc name malinka-projects-map)))
 
 
 (defun malinka-defined-project-names ()
@@ -435,8 +437,11 @@ Returns the output of the command as a string or nil in case of error"
         (include-dirs (malinka-project-map-get include-dirs project-map))
         (executable (malinka-project-map-get compiler-executable project-map)))
     (s-concat executable
+              " "
               (s-join " " compiler-flags)
+              " "
               (s-join " " (--map (s-prepend "-D" it) cpp-defines))
+              " "
               (s-join " " (--map (s-prepend "-I" it) include-dirs))
               " -c -o "
               (s-append ".o " (f-no-ext file))
@@ -476,19 +481,20 @@ from the project map"
             given-root-dir
           (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
        (processed-list (malinka-buildcmd-process project-map root-dir files-list))
-       (updated-files-list (if processed-list (nth 3 processed-list) files-list)))
-
-  ;; if we got build commands from the makefile update the project map
-  (when processed-list
-    (malinka-update-project-map project-map
-                                :cpp-defines (car processed-list)
-                                :include-dirs (nth 1 processed-list)
-                                :compiler-flags (nth 2 processed-list)))
+       (updated-files-list (if processed-list (nth 3 processed-list) files-list))
+       (updated-map
+        (if processed-list
+            (malinka-update-project-map project-map
+                                        :cpp-defines (car processed-list)
+                                        :include-dirs (nth 1 processed-list)
+                                        :compiler-flags (nth 2 processed-list))
+             ;;else
+             project-map)))
 
   ; build an association list with all the data for each file
   ; json-encode does not seem to work for a list of dicts, so we
   ; have to build it manually
-  (let ((json-list (malinka-project-create-json-list project-map
+  (let ((json-list (malinka-project-create-json-list updated-map
                                                      updated-files-list
                                                      root-dir)))
     (format "[\n%s\n]" (s-join
@@ -654,24 +660,24 @@ and returns a list of lists.  Optionally if we want to have a starting
 FILES-LIST it can be provided as an argument.
 
 This function shoud only be called if we know the project-map contains
-a build command.
+a build command.  If it does not then NIL is returned.
 
 The returned list has the form:
 '(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS FILES-LIST)"
-  (let* ((makefile (malinka-project-map-get makefile project-map))
-         (makecmd (malinka-project-map-get makecmd project-map))
-         (cmd-output
-          (shell-command-to-string (format "cd %s && %s -n" root-dir makecmd))))
-    ;; get the compile commands from the output
-    (let ((lines (s-lines cmd-output)))
-      (-reduce-from
-       'malinka-buildcmd-process-line
-       `(,(malinka-project-map-get cpp-defines project-map)
-         ,(malinka-project-map-get include-dirs project-map)
-         ,(malinka-project-map-get compiler-flags project-map)
-         ,files-list
-         ,root-dir)
-       lines))))
+  (let ((build-cmd (malinka-project-map-get build-cmd project-map)))
+    (when build-cmd
+      (let* ((cmd-output
+              (shell-command-to-string (format "cd %s && %s -n" root-dir build-cmd))))
+        ;; get the compile commands from the output
+        (let ((lines (s-lines cmd-output)))
+          (-reduce-from
+           'malinka-buildcmd-process-line
+           `(,(malinka-project-map-get cpp-defines project-map)
+             ,(malinka-project-map-get include-dirs project-map)
+             ,(malinka-project-map-get compiler-flags project-map)
+             ,files-list
+             ,root-dir)
+           lines))))))
 
 
 (defun malinka-read-project (prompt &optional default)

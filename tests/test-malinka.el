@@ -35,11 +35,17 @@
 "Assert that RESULT-LIST's and EXP-LIST's contained lists are equal."
   (should (malinka-test-contained-lists-equal? exp-list result-list)))
 
-
-(defun malinka-test-form-build-cmd (dir command file)
-  "Form a build command for DIR COMMAND and FILE."
-  (format "{\"directory\":\"%s\", \"command\":\"%s\", \"file\":\"%s\"}"
-          dir command file))
+(defun malinka-test-form-build-cmd (name f flags cpp-defines include-dirs)
+  (let* ((root (malinka-test-turn-to-absolute "test_project/"))
+         (file (f-join root f)))
+    (format "{\"directory\":\"%s\", \"command\":\"/usr/bin/gcc %s %s %s -c -o %s %s\", \"file\":\"%s\"}"
+            root
+            (s-join " " flags)
+            (s-join " " (--map (s-prepend "-D" it) cpp-defines))
+            (s-join " " (--map (s-prepend "-I" it) include-dirs))
+            (s-append ".o" (f-no-ext file))
+            file
+            file)))
 
 (defun malinka-test-turn-to-absolute (file)
   "Turn FILE into absolute path."
@@ -72,7 +78,7 @@ test can start with a clean project-map."
      (malinka-define-project
       :name "test_project"
       :root-directory ,(malinka-test-turn-to-absolute "test_project/")
-      :makecmd "make -f test_makefile")
+      :build-cmd "make -f test_makefile")
      (let* ((map (assoc "test_project" malinka-projects-map))
             (root-dir (malinka-project-map-get root-directory map)))
        (progn ,@commands)
@@ -90,7 +96,6 @@ test can start with a clean project-map."
         (,(malinka-test-turn-to-absolute "test_project/foo.c")
          ,(malinka-test-turn-to-absolute "test_project/boo.c")))))))
 
-
 (ert-deftest malinka-test/create-json-representation ()
   (malinka-test/setup-buildcmd-test-project
    (let ((json (malinka-create-json-representation nil map root-dir)))
@@ -98,18 +103,17 @@ test can start with a clean project-map."
               json
               (format "[\n%s,\n%s\n]"
                       (malinka-test-form-build-cmd
-                       (malinka-test-turn-to-absolute "test_project/")
-                       (format "/usr/bin/gcc -c -o %s.o %s.c"
-                               (malinka-test-turn-to-absolute "test_project/boo")
-                               (malinka-test-turn-to-absolute "test_project/boo"))
-
-                       (malinka-test-turn-to-absolute "test_project/boo.c"))
+                       "test_project"
+                       "foo.c"
+                       '("-Wall" "-g")
+                       '("_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("/good/include/path" "/nice/include/path/"))
                       (malinka-test-form-build-cmd
-                       (malinka-test-turn-to-absolute "test_project/")
-                       (format "/usr/bin/gcc -c -o %s.o %s.c"
-                               (malinka-test-turn-to-absolute "test_project/foo")
-                               (malinka-test-turn-to-absolute "test_project/foo"))
-                       (malinka-test-turn-to-absolute "test_project/foo.c"))))))))
+                       "test_project"
+                       "boo.c"
+                       '("-Wall" "-g")
+                       '("_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("/good/include/path" "/nice/include/path/"))))))))
 
 
 ;; -- Test some customization attributes
