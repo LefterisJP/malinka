@@ -66,11 +66,6 @@
             '(1 2 3) 4 0 '(1 2 3) '("foo" "boo") '(1200 200))
            '((4 1 2 3) ("foo" "boo") (1200 200)))))
 
-(ert-deftest malinka-test/json-format-escapes/quote ()
-  (should (equal
-           (malinka-json-format-escapes "\\\"quoted string\\\"")
-           "\"quoted string\"")))
-
 (ert-deftest malinka-test/json-format-escapes/path ()
   (should (equal
            (malinka-json-format-escapes "\\\/path\\\/to\\\/foo")
@@ -114,15 +109,19 @@ test can start with a clean project-map."
               (format "[\n%s,\n%s\n]"
                       (malinka-test-form-build-cmd
                        "test_project"
-                       "boo.c"
+                       "foo.c"
                        '("-Wall" "-g")
-                       '("STRING_VAL=\"malinka\"" "_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("STRING_VAL=\\\"malinka\\\""
+                         "_FILE_OFFSET_BITS=64"
+                         "_GNU_SOURCE")
                        '("/good/include/path" "/nice/include/path/"))
                       (malinka-test-form-build-cmd
                        "test_project"
-                       "foo.c"
+                       "boo.c"
                        '("-Wall" "-g")
-                       '("STRING_VAL=\"malinka\"" "_FILE_OFFSET_BITS=64" "_GNU_SOURCE")
+                       '("STRING_VAL=\\\"malinka\\\""
+                         "_FILE_OFFSET_BITS=64"
+                         "_GNU_SOURCE")
                        '("/good/include/path" "/nice/include/path/"))))))))
 
 

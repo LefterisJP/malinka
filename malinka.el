@@ -427,9 +427,18 @@ Returns the output of the command as a string or nil in case of error"
 ;;; --- Functions related to creating the compilation database ---
 
 (defun malinka-json-format-escapes (str)
-"Unescapes/escape special characters before signing off a json encoded STR."
-  (s-replace "\\\"" "\"" (s-replace "\\\/" "/" str)))
+  "Unescapes/escape special characters before signing off a json encoded STR."
+  (s-replace "\\\/" "/" str))
 
+(defun malinka-project-command-form-defines (cpp-defines)
+  "Form the CPP-DEFINES part of the build command."
+  (s-join " "
+          (--map (s-prepend "-D" (malinka-json-format-escapes it)) cpp-defines)))
+
+(defun malinka-project-command-form-includes (include-dirs)
+  "Form the INCLUDE-DIRS part of the build command."
+  (s-join " "
+          (--map (s-prepend "-I" (malinka-json-format-escapes it)) include-dirs)))
 
 (defun malinka-project-command-from-map (project-map file)
 "Form the compile command for a PROJECT-MAP and a specific FILE."
@@ -441,9 +450,9 @@ Returns the output of the command as a string or nil in case of error"
               " "
               (s-join " " compiler-flags)
               " "
-              (s-join " " (--map (s-prepend "-D" it) cpp-defines))
+              (malinka-project-command-form-defines cpp-defines)
               " "
-              (s-join " " (--map (s-prepend "-I" it) include-dirs))
+              (malinka-project-command-form-includes include-dirs)
               " -c -o "
               (s-append ".o " (f-no-ext file))
               file)))
@@ -510,6 +519,12 @@ performed."
     (--filter (not (f-dir? it))
               (f--entries root-dir (malinka-file-dir-p it) t)))
 
+(defun malinka-compiledb-write (str name)
+  "Create and write STR to db file NAME."
+  (f-touch name)
+  (f-write-text  str 'utf-8 name)
+  (message (format "malinka: Created %s" name)))
+
 (defun malinka-project-compiledb-create (project-map root-dir)
   "Create a json compile database for the PROJECT-MAP.
 
@@ -521,14 +536,12 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
          (json-string
           (malinka-create-json-representation
            project-files project-map root-dir)))
-    (f-touch db-file-name)
-    (f-write-text  json-string 'utf-8 db-file-name)
-    (message (format "malinka: Created %s" db-file-name))))
+    (malinka-compiledb-write json-string db-file-name)))
 
 (defun malinka-project-map-update-compiledb (project-map root-dir)
   "Update the compilation database for PROJECT-MAP and ROOT-DIR."
-  (malinka-project-compiledb-create project-map root-dir)
   (when (malinka-rtags-assert-rdm-runs)
+    (malinka-project-compiledb-create project-map root-dir)
     (with-temp-buffer
       (rtags-call-rc "-W" root-dir)
       (rtags-call-rc "-J" root-dir))))
