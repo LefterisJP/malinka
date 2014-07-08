@@ -66,6 +66,16 @@
             '(1 2 3) 4 0 '(1 2 3) '("foo" "boo") '(1200 200))
            '((4 1 2 3) ("foo" "boo") (1200 200)))))
 
+(ert-deftest malinka-test/json-format-escapes/quote ()
+  (should (equal
+           (malinka-json-format-escapes "\\\"quoted string\\\"")
+           "\"quoted string\"")))
+
+(ert-deftest malinka-test/json-format-escapes/path ()
+  (should (equal
+           (malinka-json-format-escapes "\\\/path\\\/to\\\/foo")
+           "/path/to/foo")))
+
 ;; -- Test Malinka's makefile parsing related functions
 (defmacro malinka-test/setup-buildcmd-test-project (&rest commands)
 "Setup the environment for the test-project and execute COMMANDS.
