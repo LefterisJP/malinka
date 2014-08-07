@@ -107,7 +107,9 @@ nil
   :safe #'malinka-string-list-p
   :package-version '(malinka . "0.2.0"))
 
-(defcustom malinka-supported-file-types '("c" "cc" "cpp" "tcc")
+(defcustom malinka-supported-file-types '("c" "cc" "cpp" "C" "c++" "cxx"
+                                          "h" "hh" "hpp" "H" "h++" "cxx"
+                                          "tcc")
 "File extensions that malinka will treat as related source files."
   :group 'malinka
   :type '(repeat (string :tag "Supported file types"))
