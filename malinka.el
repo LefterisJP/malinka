@@ -100,11 +100,19 @@ nil
   :safe #'malinka-string-list-p
   :package-version '(malinka . "0.2.0"))
 
-(defcustom malinka-supported-compilers '("gcc" "cc" "g++" "clang")
+(defun malinka-compiler-create (compiler)
+  "Take a COMPILER and create a list of legal string values for it."
+  (list compiler (shell-command-to-string (format "which %s" compiler))))
+
+(defcustom malinka-supported-compilers `(,(malinka-compiler-create "gcc")
+					 ,(malinka-compiler-create "cc")
+					 ,(malinka-compiler-create "g++")
+					 ,(malinka-compiler-create "clang")
+					 ,(malinka-compiler-create "c++"))
 "A list of compiler executable names that are recognized and supported by malinka."
   :group 'malinka
   :type '(repeat (string :tag "Supported compilers"))
-  :safe #'malinka-string-list-p
+  ;; :safe #'malinka-string-list-p
   :package-version '(malinka . "0.2.0"))
 
 (defcustom malinka-supported-file-types '("c" "cc" "cpp" "C" "c++" "cxx"
@@ -138,6 +146,30 @@ nil
                  (const :tag "Build command and recursive file search"
                         build-and-recursive))
   :package-version '(malinka . "0.2.0"))
+
+(defcustom malinka-print-info? t "If true malinka will be printing some info messages of the actions it takes"
+  :group 'malinka
+  :type 'boolean
+  :safe #'booleanp
+  :package-version '(malinka . "0.3.0"))
+
+(defcustom malinka-print-warning? nil "If true malinka will be printing warning messages in case things go wrong but can be taken care of"
+  :group 'malinka
+  :type 'boolean
+  :safe #'booleanp
+  :package-version '(malinka . "0.3.0"))
+
+(defcustom malinka-print-debug? nil "If true malinka will be printing a lot of DEBUG messages. Only useful for debugging"
+  :group 'malinka
+  :type 'boolean
+  :safe #'booleanp
+  :package-version '(malinka . "0.3.0"))
+
+(defcustom malinka-print-xdebug? nil "If true malinka will be printing extreme DEBUG messages. Only useful for debugging. Warning: This WILL spam the *Messages* buffer"
+  :group 'malinka
+  :type 'boolean
+  :safe #'booleanp
+  :package-version '(malinka . "0.3.0"))
 
 ;;; --- Global project variables ---
 
@@ -187,8 +219,32 @@ nil
 
 
 (defmacro malinka-error (fmt &rest args)
-"Issue an error, by passing FMT and ARGS to (error)."
+"Issue an internal error, by passing FMT and ARGS to (error)."
 `(error (concat "Malinka-error: " ,fmt) ,@args))
+
+(defmacro malinka-user-error (fmt &rest args)
+"Issue a user error, by passing FMT and ARGS to (error)."
+`(user-error (concat "Malinka-user-error: " ,fmt) ,@args))
+
+(defmacro malinka-info (fmt &rest args)
+  "Depending on the value of `malinka-print-info?' this macro will print messages by passing FMT and ARGS to message."
+  `(when malinka-print-info?
+     (message (concat "Malinka-info: " ,fmt) ,@args)))
+
+(defmacro malinka-warning (fmt &rest args)
+  "Depending on the value of `malinka-print-warning?' this macro will print messages by passing FMT and ARGS to message."
+  `(when malinka-print-warning?
+     (message (concat "Malinka-warning: " ,fmt) ,@args)))
+
+(defmacro malinka-debug (fmt &rest args)
+  "Depending on the value of `malinka-print-debug?' this macro will print messages by passing FMT and ARGS to message."
+  `(when malinka-print-debug?
+     (message (concat "Malinka-debug: " ,fmt) ,@args)))
+
+(defmacro malinka-xdebug (fmt &rest args)
+  "Depending on the value of `malinka-print-xdebug?' this macro will print extreme debug messages by passing FMT and ARGS to message."
+  `(when malinka-print-xdebug?
+     (message (concat "Malinka-xdebug: " ,fmt) ,@args)))
 
 ;;; --- Utility functions ---
 
@@ -201,6 +257,7 @@ nil
 (defun malinka-file-make-absolute (root-dir file)
   "Use ROOT-DIR to turn FILE into its absolute path version."
   (f-join root-dir file))
+
 ;;; --- Predicate functions ---
 
 (defun malinka-string-list-p (obj)
@@ -234,7 +291,19 @@ is basically any directory except known ignored directories"
     (malinka-file-p file)
   (not (-contains? 'malinka-ignored-directories (f-filename file)))))
 
+(defun malinka-word-is-compiler (word)
+  "Determine if WORD is a compiler command."
+  (--any?
+   (or (s-equals? word (nth 0 it))
+       (s-equals? word (nth 1 it))
+       ;; unfortunately in archlinux `which gcc' returns /usr/sbin but there is a copy in /usr/bin too. Need to cover both
+       (s-equals? word (f-join "/" "usr" "bin" (nth 0 it))))
+   malinka-supported-compilers))
+
 ;;; --- Elisp internal API
+(cl-defstruct compile-command directory executable file)
+
+
 (defun* malinka-define-project (&key (name "Project Name")
                                  (compiler-executable "/usr/bin/gcc")
                                  (cpp-defines '())
@@ -442,12 +511,23 @@ Returns the output of the command as a string or nil in case of error"
   (s-join " "
           (--map (s-prepend "-I" (malinka-json-format-escapes it)) include-dirs)))
 
-(defun malinka-project-command-from-map (project-map file)
-"Form the compile command for a PROJECT-MAP and a specific FILE."
+(defun malinka-project-command-from-map (project-map file-or-cmd)
+"Form the compile command for a PROJECT-MAP.
+
+The second argument FILE-OR-CMD can either be a file's string representation or
+a `compile-command' structure."
+
+  (malinka-xdebug "command-from-map's file-or-cmd: %s" file-or-cmd)
+
   (let ((cpp-defines (malinka-project-map-get cpp-defines project-map))
         (compiler-flags (malinka-project-map-get compiler-flags project-map))
         (include-dirs (malinka-project-map-get include-dirs project-map))
-        (executable (malinka-project-map-get compiler-executable project-map)))
+        (executable (if (stringp file-or-cmd)
+			(malinka-project-map-get compiler-executable project-map)
+		      (compile-command-executable file-or-cmd)))
+	(file (if (stringp file-or-cmd)
+		  file-or-cmd
+		(compile-command-file file-or-cmd))))
     (s-concat executable
               " "
               (s-join " " compiler-flags)
@@ -460,13 +540,17 @@ Returns the output of the command as a string or nil in case of error"
               file)))
 
 (defun malinka-project-create-json-list (project-map
-                                         files-list
+                                         compile-commands-list
                                          root-dir)
 "Create the json association list for this project.
 
-Read the PROJECT-MAP and use the FILES-LIST and all the attributes
+Read the PROJECT-MAP and use the COMPILE-COMMANDS-LIST and all the attributes
 of a project to create the commands.
 Finally ROOT-DIR determines the root directory to write to the file."
+(when (not compile-commands-list)
+  (malinka-error "Empty compile-commands-list provided"))
+
+(malinka-xdebug "Creating json-list for compile commands\n %s" compile-commands-list)
     (-map
      (lambda (item)
        (let* ((command-string
@@ -475,25 +559,27 @@ Finally ROOT-DIR determines the root directory to write to the file."
          (json-encode-alist
           `((directory . ,root-dir)
             (command . ,command-string)
-            (file . ,item))))) files-list))
+            (file . ,(compile-command-file item)))))) compile-commands-list))
 
 (defun malinka-create-json-representation (files-list
                                            project-map
-                                           given-root-dir)
+                                           given-root-dir
+					   compile-output)
 "Return the json representation that should go into the compilation DB.
 
 The contents are defined by reading all the relevant files from the
 FILES-LIST and by getting the cpp-defines and the root-directory
-from the PROJECT-MAP.
+from the PROJECT-MAP or the GIVEN-ROOT-DIR from the arguments.
 
-If there is a GIVEN-ROOT-DIR then this is used instead of the one taken
-from the project map"
-(let* ((root-dir
-        (if given-root-dir
-            given-root-dir
-          (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
-       (processed-list (malinka-buildcmd-process project-map root-dir files-list))
-       (updated-files-list (if processed-list (nth 3 processed-list) files-list))
+Also parses the COMPILE-OUTPUT in order to obtain the relevant data."
+(let* ((root-dir (if given-root-dir
+		     given-root-dir
+		   (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
+       (processed-list (malinka-buildcmd-process project-map
+						 root-dir
+						 compile-output
+						 files-list))
+       ;; (updated-files-list (if processed-list (nth 3 processed-list) files-list))
        (updated-map
         (if processed-list
             (malinka-update-project-map project-map
@@ -503,11 +589,14 @@ from the project map"
              ;;else
              project-map)))
 
+  (malinka-debug "Processed list after build-cmd-process: %s" processed-list)
+
   ; build an association list with all the data for each file
   ; json-encode does not seem to work for a list of dicts, so we
   ; have to build it manually
-  (let ((json-list (malinka-project-create-json-list updated-map
-                                                     updated-files-list
+  (let* ((compile-commands-list (nth 4 processed-list))
+	 (json-list (malinka-project-create-json-list updated-map
+                                                     compile-commands-list
                                                      root-dir)))
     (format "[\n%s\n]" (s-join
                         ",\n" (-map 'malinka-json-format-escapes json-list))))))
@@ -525,28 +614,52 @@ performed."
   "Create and write STR to db file NAME."
   (f-touch name)
   (f-write-text  str 'utf-8 name)
-  (message (format "malinka: Created %s" name)))
+  (malinka-info "malinka: Created %s" name))
 
-(defun malinka-project-compiledb-create (project-map root-dir)
+(defun malinka-project-compiledb-create (project-map root-dir compile-output)
   "Create a json compile database for the PROJECT-MAP.
 
-Creates the configuration for NAME with ROOT-DIR.
+Creates the configuration for PROJECT-MAP with ROOT-DIR and the given
+COMPILE-OUTPUT.
+
 For more information on the compilations database please refer here:
 http://clang.llvm.org/docs/JSONCompilationDatabase.html"
   (let* ((project-files (malinka-project-recursive-file-search root-dir))
          (db-file-name (f-join root-dir "compile_commands.json"))
          (json-string
-          (malinka-create-json-representation
-           project-files project-map root-dir)))
+          (malinka-create-json-representation project-files
+					      project-map
+					      root-dir
+					      compile-output)))
     (malinka-compiledb-write json-string db-file-name)))
 
 (defun malinka-project-map-update-compiledb (project-map root-dir)
   "Update the compilation database for PROJECT-MAP and ROOT-DIR."
   (when (malinka-rtags-assert-rdm-runs)
-    (malinka-project-compiledb-create project-map root-dir)
-    (with-temp-buffer
-      (rtags-call-rc "-W" root-dir)
-      (rtags-call-rc "-J" root-dir))))
+
+    (malinka-project-execute-compile-cmd project-map root-dir)))
+
+
+
+(defun malinka-handle-compile-finish (process event)
+  "Handle all events from the project compilation PROCESS.
+
+This is basically the starting point of creating the data required by malinka.
+EVENT is ignored."
+  (when (memq (process-status process) '(signal exit))
+    (let* ((project-map (process-get process 'malinka-project-map))
+	   (project-name (malinka-project-map-get name project-map))
+	   (root-dir    (process-get process 'malinka-project-root-dir))
+	   (buffer      (process-buffer process))
+	   (output      (with-current-buffer buffer
+			  (save-excursion
+			    (goto-char (point-min))
+			    (buffer-string)))))
+      (malinka-info "Compilation for \"%s\" finished. Proceeding to process the output" project-name)
+      (malinka-project-compiledb-create project-map root-dir output)
+      (with-temp-buffer
+	(rtags-call-rc "-W" root-dir)
+	(rtags-call-rc "-J" root-dir)))))
 
 
 
@@ -575,25 +688,57 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
         nil))))
 
 
-(defun malinka-buildcmd-line-begins-with-compile (line)
-  "Determine wether LINE begins with a compile command.
-If it does return the list of 'words' contained in the line.
+(defun malinka-buildcmd-line-contains-compile (line)
+  "Determine whether a given LINE contains a compile command.
+If it does return a list: '([nil | directory to cd]
+                            compiler-executable
+                            compiled-file
+                            '(list of words contained in cmd))
+
 If not return nil."
   (let* ((words (s-split " " line))
-         (first-word (car words)))
-    (if (-contains? malinka-supported-compilers first-word)
-        words
+         ;; check if the command asks us to cd to a directory
+         (cd-index (--find-index (s-equals? it "cd") words))
+         (cd-dir   (when cd-index (nth (+ cd-index 1) words)))
+         ;; find compile command and its starting index
+         (compile-start-index (--find-index
+                               (malinka-word-is-compiler it) words))
+	 (compiler-executable (when compile-start-index
+				(nth compile-start-index words)))
+	 ;; find compiled file
+	 (compiled-file-index (when compile-start-index
+				(--find-index (malinka-file-p it) words)))
+	 (compiled-file (when compiled-file-index
+			  (nth compiled-file-index words))))
+
+    (if compile-start-index
+	(progn
+
+	  (malinka-xdebug "words: %s" words)
+	  (malinka-debug "cd directory index: %s" cd-index)
+	  (malinka-debug "cd directory: %s" cd-dir)
+	  (malinka-debug "compile-start-index: %s" compile-start-index)
+	  (malinka-debug "compiler-executable: %s" compiler-executable)
+	  (malinka-debug "compiled-file-index: %s" compiled-file-index)
+	  (malinka-debug "compiled-file: %s" compiled-file)
+
+	  (if (not compiled-file)
+	      (progn
+		(malinka-warning "Compiled file not found during line analysis")
+		nil)
+	    ;; else
+	  `(,cd-dir ,compiler-executable ,compiled-file ,(-drop compile-start-index words))))
+      ;; else
       nil)))
 
-(defun malinka-add-if-not-existing (list elem ind &rest vars)
-"Add to LIST the ELEM at IND if not existing.
-
-Return VARS list if existing and if not existing returns the VARS
-list with ELEM appended to the IND sublist."
-  (if (-contains? list elem)
-      vars
+(defun malinka-sublist-add-if-not-existing (input-list ind element)
+"Add to INPUT-LIST's IND sublist ELEMENT, if it does not already exist."
+(let ((sublist (nth ind input-list)))
+  (if (-contains? sublist element)
+      input-list
     ;;else
-    (-replace-at ind (cons elem (nth ind vars)) vars)))
+    (-replace-at ind (-snoc sublist element) input-list))))
+
 
 (defun malinka-buildcmd-ignore-argument-p (arg)
   "Return true if ARG of the build command should be ignored."
@@ -610,93 +755,109 @@ list with ELEM appended to the IND sublist."
   (let ((cpp-defines (car input-list))
         (include-dirs (nth 1 input-list))
         (compiler-flags (nth 2 input-list))
-        (files-list (nth 3 input-list))
-        (root-dir (nth 4 input-list)))
+        (given-root-dir (nth 3 input-list))
+        (compile-commands-list (nth 4 input-list)))
     (cond
      ((s-starts-with? "-D" word)
       (let ((cpp-define (s-chop-prefix "-D" word)))
-        (malinka-add-if-not-existing cpp-defines cpp-define
-                                     0 cpp-defines include-dirs
-                                     compiler-flags files-list root-dir)))
+	(malinka-sublist-add-if-not-existing input-list 0 cpp-define)))
 
      ((s-starts-with? "-I" word)
       (let ((include-dir
              ;; TODO: think about include dirs and absolute or not
              ;; (malinka-file-make-absolute root-dir (s-chop-prefix "-I" word))))
              (s-chop-prefix "-I" word)))
-        (malinka-add-if-not-existing include-dirs include-dir
-                                     1 cpp-defines include-dirs
-                                     compiler-flags files-list root-dir)))
-
-
-     ((malinka-file-p word)
-      (let ((file (malinka-file-make-absolute root-dir word)))
-        ;; If it's a source file and config allows add it to the file-list
-        (unless (eq malinka-files-list-populator 'recursive)
-          (malinka-add-if-not-existing files-list file
-                                       3 cpp-defines include-dirs
-                                       compiler-flags files-list root-dir))))
+	(malinka-sublist-add-if-not-existing input-list 1 include-dir)))
 
      ((malinka-buildcmd-ignore-argument-p word)
       input-list)
 
-     ((-contains? malinka-supported-compilers word)
-      ;; If it's a compiler argument (should be first)
-      ;; then this should help us determine the compiler.
-      ;; TODO: but .. for now ignore
-      input-list)
-
      (:else
-      ;; All other choices would be compiler flags
-      (malinka-add-if-not-existing compiler-flags word
-                                   2 cpp-defines include-dirs
-                                   compiler-flags files-list root-dir)))))
+      ;; All other choices should be compiler flags
+      (malinka-sublist-add-if-not-existing input-list 2 word)))))
 
-(defun malinka-buildcmd-line-link-cmd-p (words)
-  "Return t if the line comprised of WORDS is a linking related cmd.
+(defun malinka-add-compile-command (input-list line-analysis given-root-dir)
+  "Add to the INPUT-LIST the results of a succesfull LINE-ANALYSIS.
 
-The logic is that if no source file is found in the command then it's a linking
-command.  Maybe a better way could be devised ..."
-  (not (-any? 'malinka-file-p words)))
+If line-analysis does not contain a directory to cd to then the GIVEN-ROOT-DIR
+is used."
+  (let* ((root-dir (if (nth 0 line-analysis) (nth 0 line-analysis) given-root-dir))
+	(executable (nth 1 line-analysis))
+	(compiled-file (nth 2 line-analysis))
+	(compile-cmd (make-compile-command :directory root-dir
+					   :executable executable
+					   :file compiled-file)))
+    (-replace-at 4 (-snoc (nth 4 input-list) compile-cmd) input-list)))
 
 
 (defun malinka-buildcmd-process-line (input-list line)
   "Read the INPUT-LIST and if LINE is a compile command, process it."
-  (let ((words (malinka-buildcmd-line-begins-with-compile line)))
-    (if (and words (not (malinka-buildcmd-line-link-cmd-p words)))
-        (-reduce-from 'malinka-buildcmd-process-word input-list words)
+  (malinka-debug "Analyzing line %s" line)
+
+  (let ((line-analysis (malinka-buildcmd-line-contains-compile line)))
+
+    (malinka-debug "Line analysis returns %s" line-analysis)
+
+    (if
+        line-analysis
+	(let* ((words (nth 3 line-analysis))
+	       (given-root-dir (nth 3 input-list))
+	       (new-input-list (malinka-add-compile-command
+				input-list
+				line-analysis
+				given-root-dir)))
+
+	  (malinka-xdebug "Input list before processing words: %s" new-input-list)
+
+	(-reduce-from 'malinka-buildcmd-process-word new-input-list words))
       ;; else return unchanged
       input-list)))
 
-(defun malinka-build-cmd-to-str (build-cmd root-dir)
+(defun malinka-build-cmd-to-str-synchronous (build-cmd root-dir)
 "Turn the BUILD-CMD of project at ROOT-DIR into a string."
-(s-replace "\\\"" "\"" (shell-command-to-string (format "cd %s && %s -n" root-dir build-cmd))))
+(let ((augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
+  (malinka-debug "Augmented build cmd: %s" augmented-build-cmd)
+  (s-replace "\\\"" "\"" (shell-command-to-string augmented-build-cmd))))
 
-(defun malinka-buildcmd-process (project-map root-dir &optional files-list)
+(defun malinka-project-execute-compile-cmd (project-map root-dir)
+  "Execute the build-cmd of PROJECT-MAP with ROOT-DIR and setup the compile process."
+  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
+	 (augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
+    (malinka-info "Executing compile command: %s" augmented-build-cmd)
+    (malinka-info "Waiting for compilation to finish")
+    (let ((process (start-process-shell-command "malinka-compile-project"
+						"*malinka-compile-project*"
+						augmented-build-cmd)))
+      (set-process-query-on-exit-flag process nil)
+      (set-process-sentinel process 'malinka-handle-compile-finish)
+      (process-put process 'malinka-project-map project-map)
+      (process-put process 'malinka-project-root-dir root-dir))))
+
+(defun malinka-buildcmd-process (project-map root-dir compile-output &optional
+					     files-list)
   "Read the build commands from a project's makefile.
 
-Read the PROJECT-MAP and ROOT-DIR combination thas has a makefile
-and returns a list of lists.  Optionally if we want to have a starting
+Read the PROJECT-MAP, ROOT-DIR and COMPILE-OUTPUT combination
+and return a list of lists.  Optionally if we want to have a starting
 FILES-LIST it can be provided as an argument.
 
 This function shoud only be called if we know the project-map contains
 a build command.  If it does not then NIL is returned.
 
 The returned list has the form:
-'(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS FILES-LIST)"
-  (let ((build-cmd (malinka-project-map-get build-cmd project-map)))
-    (when build-cmd
-      (let* ((cmd-output (malinka-build-cmd-to-str build-cmd root-dir))
-             ;; get the compile commands from the output
-             (lines (s-lines cmd-output)))
-        (-reduce-from
-         'malinka-buildcmd-process-line
-         `(,(malinka-project-map-get cpp-defines project-map)
-           ,(malinka-project-map-get include-dirs project-map)
-           ,(malinka-project-map-get compiler-flags project-map)
-           ,files-list
-           ,root-dir)
-         lines)))))
+'(CPP-DEFINES INCLUDE-DIRS COMPILER-FLAGS GIVEN-ROOT-DIR COMPILE-COMMANDS-LIST)"
+
+  ;; NOTE: the old way of doing things was with a files-list, which is now
+  ;; no longer used
+  (let ((lines (s-lines compile-output)))
+    (-reduce-from
+     'malinka-buildcmd-process-line
+     `(,(malinka-project-map-get cpp-defines project-map)
+       ,(malinka-project-map-get include-dirs project-map)
+       ,(malinka-project-map-get compiler-flags project-map)
+       ,root-dir
+       ,'())
+     lines)))
 
 
 (defun malinka-read-project (prompt &optional default)
@@ -735,12 +896,18 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
      (list project-name given-dir)))
+
+  (malinka-info "Configuring project %s" name)
+
   (let ((root-dir (f-canonical given-root-dir))
         (project-map (assoc name malinka-projects-map)))
+
+    (malinka-debug "root dir is %s" root-dir)
+
     (if project-map
         (malinka-project-map-update-compiledb project-map root-dir)
       ;; else - given project NAME not found
-      (message "malinka: Project %s is not known. Use malinka-define-project to fix this" name))))
+      (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
 
 ;;;###autoload
 (defun malinka-project-add-file (file-name project-name)
