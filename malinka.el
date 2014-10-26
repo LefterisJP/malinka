@@ -647,18 +647,20 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
 This is basically the starting point of creating the data required by malinka.
 EVENT is ignored."
   (when (memq (process-status process) '(signal exit))
-    (let* ((project-map (process-get process 'malinka-project-map))
-	   (project-name (malinka-project-map-get name project-map))
-	   (root-dir    (process-get process 'malinka-project-root-dir))
-	   (buffer      (process-buffer process))
-	   (output      (with-current-buffer buffer
-			  (save-excursion
-			    (goto-char (point-min))
-			    (buffer-string)))))
+    (let* ((project-map  (process-get process 'malinka-project-map))
+           (project-name (malinka-project-map-get name project-map))
+           (root-dir     (process-get process 'malinka-project-root-dir))
+           (buffer       (process-buffer process))
+           (output       (with-current-buffer buffer
+                           (save-excursion
+                             (goto-char (point-min))
+                             (s-replace "\\\"" "\""
+                                        (buffer-string))))))
       (malinka-info "Compilation for \"%s\" finished. Proceeding to process the output" project-name)
+      (kill-buffer buffer)
       (malinka-project-compiledb-create project-map root-dir output)
       (with-temp-buffer
-	(rtags-call-rc "-W" root-dir)
+        (rtags-call-rc "-W" root-dir)
 	(rtags-call-rc "-J" root-dir)))))
 
 
@@ -821,13 +823,15 @@ is used."
 
 (defun malinka-project-execute-compile-cmd (project-map root-dir)
   "Execute the build-cmd of PROJECT-MAP with ROOT-DIR and setup the compile process."
-  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
-	 (augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
+  (let* ((build-cmd    (malinka-project-map-get build-cmd project-map))
+         (project-name (malinka-project-map-get name project-map))
+         (process-name  (format "malinka-compile-command-%s" project-name))
+         (augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
     (malinka-info "Executing compile command: %s" augmented-build-cmd)
     (malinka-info "Waiting for compilation to finish")
-    (let ((process (start-process-shell-command "malinka-compile-project"
-						"*malinka-compile-project*"
-						augmented-build-cmd)))
+    (let ((process (start-process-shell-command process-name
+                                                (format "*%s*" process-name)
+                                                augmented-build-cmd)))
       (set-process-query-on-exit-flag process nil)
       (set-process-sentinel process 'malinka-handle-compile-finish)
       (process-put process 'malinka-project-map project-map)
