@@ -641,6 +641,15 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
 
 
 
+(defun malinka-select-project (root-dir)
+  "Select a malinka project at ROOT-DIR.
+A compilecommands.json compilation database must already exist there"
+  (if (f-exists? (f-join root-dir "compile_commands.json"))
+      (progn
+        (malinka-rtags-invoke-with "-W" root-dir)
+        (malinka-rtags-invoke-with "-J" root-dir))
+    (malinka-user-error "Could not find a compilation database file in directory %s" root-dir)))
+
 (defun malinka-handle-compile-finish (process event)
   "Handle all events from the project compilation PROCESS.
 
@@ -660,8 +669,7 @@ EVENT is ignored."
       (kill-buffer buffer)
       (malinka-project-compiledb-create project-map root-dir output)
       (with-temp-buffer
-        (rtags-call-rc "-W" root-dir)
-	(rtags-call-rc "-J" root-dir)))))
+        (malinka-select-project root-dir)))))
 
 
 
@@ -910,6 +918,32 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
 
     (if project-map
         (malinka-project-map-update-compiledb project-map root-dir)
+      ;; else - given project NAME not found
+      (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
+
+;;;###autoload
+(defun malinka-project-select (name given-root-dir)
+  "Select a project by querying for both NAME and GIVEN-ROOT-DIR.
+
+If multiple projects with the same name in different directories may
+exist then it's nice to provide the ROOT-DIR of the project to configure"
+  (interactive
+   (let* ((project-name
+           (malinka-read-project "Project: " (malinka-default-project)))
+          (project-root-dir (malinka-project-name-get root-directory project-name))
+          (given-dir (if project-root-dir project-root-dir
+                       (read-directory-name "Project root: "))))
+     (list project-name given-dir)))
+
+  (malinka-info "Configuring project %s" name)
+
+  (let ((root-dir (f-canonical given-root-dir))
+        (project-map (assoc name malinka-projects-map)))
+
+    (malinka-debug "root dir is %s" root-dir)
+
+    (if project-map
+        (malinka-select-project root-dir)
       ;; else - given project NAME not found
       (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
 
