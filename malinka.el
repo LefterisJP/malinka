@@ -311,7 +311,10 @@ is basically any directory except known ignored directories"
                                  (include-dirs '())
                                  (root-directory nil)
                                  (same-name-check t)
-                                 (build-cmd nil))
+                                 (build-cmd nil)
+                                 (build-root-directory nil)
+                                 (compile-cmd nil)
+                                 (test-cmd nil))
 "Define a c/c++ project named NAME.
 
 NAME should be the same as the file-name of the root-directory of the project
@@ -343,31 +346,65 @@ true.
 A user can provide a `build-cmd' such as 'make -f target_makefile' for malinka
 to attempt to parse that and get all project attributes.
 
+If the root directory of the project differs from the directory from which the
+build command is issued then a user can provide the `build-root-directory'.
+
+A user can also provide a `compile-cmd' which will be forwarded to projectile
+as the project's compile command. Default keybinding: C-c p c
+
+A user can also provide a `test-cmd' which will be forwarded to projectile
+as the project's test command. Default keybinding: C-c p P
+
 The project is added to the global `malinka-projects-map'
 "
-(unless (stringp name) (malinka-error "Provided non-string for project name"))
-(unless (or (not build-cmd) (stringp build-cmd))
-  (malinka-error "Provided non-string for the project's build command"))
-(unless (or (not compiler-executable) (f-executable? compiler-executable))
-  (malinka-error "Can't find compiler executable \"%s\"" compiler-executable))
-(when root-directory
-  (unless (f-directory? root-directory)
+(let ((new-root-directory
+       (if root-directory (f-slash root-directory) nil))
+      (new-build-root-directory
+       (if build-root-directory (f-slash build-root-directory) nil)))
+
+  (unless (stringp name) (malinka-error "Provided non-string for project name"))
+  (unless (or (not build-cmd) (stringp build-cmd))
+    (malinka-error "Provided non-string for the project's build command"))
+  (unless (or (not compiler-executable) (f-executable? compiler-executable))
+    (malinka-error "Can't find compiler executable \"%s\"" compiler-executable))
+  (when root-directory
+    (unless (f-directory? root-directory)
+      (malinka-error
+       "Provided root directory of project \"%s\" does not exist" name)))
+    (when build-root-directory
+      (unless (f-directory? build-root-directory)
+        (malinka-error
+         "Provided build root directory of project \"%s\" does not exist" name)))
+  (unless (malinka-string-list-p cpp-defines)
     (malinka-error
-     "Provided root directory of project \"%s\" does not exist" name)))
-(unless (malinka-string-list-p cpp-defines)
-  (malinka-error
-   "Provided non all-string list for project \"%s\" defines" name))
-(unless (malinka-string-list-p compiler-flags)
-  (malinka-error
-   "Provided non all-string list for project \"%s\" compiler flags" name))
+     "Provided non all-string list for project \"%s\" defines" name))
+  (unless (malinka-string-list-p compiler-flags)
+    (malinka-error
+     "Provided non all-string list for project \"%s\" compiler flags" name))
   (unless (malinka-string-list-p include-dirs)
-  (malinka-error
-   "Provided non all-string list for project \"%s\" includes" name))
+    (malinka-error
+     "Provided non all-string list for project \"%s\" includes" name))
 
   ;; to avoid some association list problems
   ;; delete it if it already exists before redefining
   (when (assoc name malinka-projects-map)
-      (malinka-delete-project name))
+    (malinka-delete-project name))
+
+  ;; set the compile command for projectile
+  (when (and compile-cmd root-directory)
+    (progn
+      (require 'projectile)
+      (puthash new-root-directory
+               compile-cmd
+               projectile-compilation-cmd-map)))
+
+  ;; set the test command for projectile
+  (when (and test-cmd root-directory)
+    (progn
+      (require 'projectile)
+      (puthash new-root-directory
+               test-cmd
+               projectile-test-cmd-map)))
 
   (add-to-list 'malinka-projects-map
                `(,name . ((name . ,name)
@@ -375,9 +412,12 @@ The project is added to the global `malinka-projects-map'
                           (compiler-flags . ,compiler-flags)
                           (cpp-defines . ,cpp-defines)
                           (include-dirs . ,include-dirs)
-                          (root-directory . ,root-directory)
+                          (root-directory . ,new-root-directory)
                           (same-name-check . ,same-name-check)
-                          (build-cmd . ,build-cmd)))))
+                          (build-cmd . ,build-cmd)
+                          (compile-cmd . ,compile-cmd)
+                          (test-cmd . ,test-cmd)
+                          (build-root-directory . ,new-build-root-directory))))))
 
 (defun malinka-delete-project (name)
   "Delete project NAME from the projects map."
@@ -410,7 +450,10 @@ ELEM can be either a single element or another list"
          (root-directory (malinka-project-map-get root-directory map))
          (same-name-check (malinka-project-map-get same-name-check map))
          (makefile (malinka-project-map-get makefile map))
-         (build-cmd (malinka-project-map-get build-cmd map)))
+         (build-cmd (malinka-project-map-get build-cmd map))
+         (compile-cmd (malinka-project-map-get compile-cmd map))
+         (test-cmd (malinka-project-map-get test-cmd map))
+         (build-root-directory (malinka-project-map-get build-root-directory map)))
     ;; first delete the project from the project list
     (malinka-delete-project name)
     ;; then add the updated project map to malinka projects
@@ -424,7 +467,10 @@ ELEM can be either a single element or another list"
                             (root-directory . ,root-directory)
                             (same-name-check . ,same-name-check)
                             (makefile . ,makefile)
-                            (build-cmd . ,build-cmd)))))
+                            (build-cmd . ,build-cmd)
+                            (compile-cmd . ,compile-cmd)
+                            (test-cmd . ,compile-cmd)
+                            (build-root-directory . ,build-root-directory)))))
     ;; return the updated project map
     (assoc name malinka-projects-map)))
 
@@ -435,6 +481,16 @@ ELEM can be either a single element or another list"
                    (lambda (it) (cdr (assoc 'name (cdr it))))
                    malinka-projects-map)))
     (sort projects #'string<)))
+
+(defun malinka-project-get-build-root (map)
+  "Get either the build root directory or root directory of a project's MAP.
+
+If neither exists an error is signaled"
+  (let ((build-root-dir (malinka-project-map-get build-root-directory map))
+        (root-dir (malinka-project-map-get build-root-directory map)))
+    (if build-root-dir build-root-dir
+      (if root-dir root-dir
+        (malinka-error "Neither a build root directory or a root directory has been provided")))))
 
 (defun malinka-project-detect-root ()
   "Attempts to detect the project root for the current buffer.
@@ -564,7 +620,7 @@ Finally ROOT-DIR determines the root directory to write to the file."
 (defun malinka-create-json-representation (files-list
                                            project-map
                                            given-root-dir
-					   compile-output)
+                                           compile-output)
 "Return the json representation that should go into the compilation DB.
 
 The contents are defined by reading all the relevant files from the
@@ -573,12 +629,12 @@ from the PROJECT-MAP or the GIVEN-ROOT-DIR from the arguments.
 
 Also parses the COMPILE-OUTPUT in order to obtain the relevant data."
 (let* ((root-dir (if given-root-dir
-		     given-root-dir
-		   (f-canonical (cdr (assoc 'root-directory (cdr project-map))))))
+                     given-root-dir
+                   (malinka-project-map-get root-dir project-map)))
        (processed-list (malinka-buildcmd-process project-map
-						 root-dir
-						 compile-output
-						 files-list))
+                                                 root-dir
+                                                 compile-output
+                                                 files-list))
        ;; (updated-files-list (if processed-list (nth 3 processed-list) files-list))
        (updated-map
         (if processed-list
@@ -588,7 +644,6 @@ Also parses the COMPILE-OUTPUT in order to obtain the relevant data."
                                         :compiler-flags (nth 2 processed-list))
              ;;else
              project-map)))
-
   (malinka-debug "Processed list after build-cmd-process: %s" processed-list)
 
   ; build an association list with all the data for each file
@@ -596,8 +651,8 @@ Also parses the COMPILE-OUTPUT in order to obtain the relevant data."
   ; have to build it manually
   (let* ((compile-commands-list (nth 4 processed-list))
 	 (json-list (malinka-project-create-json-list updated-map
-                                                     compile-commands-list
-                                                     root-dir)))
+                                                  compile-commands-list
+                                                  (malinka-project-get-build-root project-map))))
     (format "[\n%s\n]" (s-join
                         ",\n" (-map 'malinka-json-format-escapes json-list))))))
 
@@ -833,8 +888,9 @@ is used."
   "Execute the build-cmd of PROJECT-MAP with ROOT-DIR and setup the compile process."
   (let* ((build-cmd    (malinka-project-map-get build-cmd project-map))
          (project-name (malinka-project-map-get name project-map))
+         (build-root-dir (malinka-project-get-build-root project-map))
          (process-name  (format "malinka-compile-command-%s" project-name))
-         (augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
+         (augmented-build-cmd (format "cd %s && %s" build-root-dir build-cmd)))
     (malinka-info "Executing compile command: %s" augmented-build-cmd)
     (malinka-info "Waiting for compilation to finish")
     (let ((process (start-process-shell-command process-name
