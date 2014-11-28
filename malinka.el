@@ -304,6 +304,52 @@ is basically any directory except known ignored directories"
 (cl-defstruct compile-command directory executable file)
 
 
+(defun malinka-project-process-compile-cmd (compile-cmd
+                                            root-directory
+                                            build-root-directory)
+  "Process COMPILE-CMD for a project at ROOT-DIRECTORY issued inside BUILD-ROOT-DIRECTORY."
+  (unless compile-cmd nil)
+  (unless root-directory
+    (progn
+      (malinka-error
+       "Provided compile-cmd \"%s\" for a project without a root directory"
+       compile-cmd)
+      nil))
+
+  (let ((new-compile-cmd
+         (if build-root-directory
+             (format "cd %s && %s" build-root-directory compile-cmd)
+           ;;else
+           compile-cmd)))
+    (require 'projectile)
+    (puthash root-directory
+             new-compile-cmd
+             projectile-compilation-cmd-map)
+    new-compile-cmd))
+
+(defun malinka-project-process-test-cmd (test-cmd
+                                         root-directory
+                                         build-root-directory)
+  "Process TEST-CMD for a project at ROOT-DIRECTORY issued inside BUILD-ROOT-DIRECTORY."
+  (unless test-cmd nil)
+  (unless root-directory
+    (progn
+      (malinka-error
+       "Provided compile-cmd \"%s\" for a project without a root directory"
+       test-cmd)
+      nil))
+
+  (let ((new-test-cmd
+         (if build-root-directory
+             (format "cd %s && %s" build-root-directory test-cmd)
+           ;;else
+           test-cmd)))
+    (require 'projectile)
+    (puthash root-directory
+             new-test-cmd
+             projectile-test-cmd-map)
+    new-test-cmd))
+
 (defun* malinka-define-project (&key (name "Project Name")
                                  (compiler-executable "/usr/bin/gcc")
                                  (cpp-defines '())
@@ -357,10 +403,16 @@ as the project's test command. Default keybinding: C-c p P
 
 The project is added to the global `malinka-projects-map'
 "
-(let ((new-root-directory
-       (if root-directory (f-slash root-directory) nil))
-      (new-build-root-directory
-       (if build-root-directory (f-slash build-root-directory) nil)))
+(let* ((new-root-directory
+        (if root-directory (f-slash root-directory) nil))
+       (new-build-root-directory
+        (if build-root-directory (f-slash build-root-directory) nil))
+       (new-compile-cmd (malinka-project-process-compile-cmd compile-cmd
+                                                             new-root-directory
+                                                             new-build-root-directory))
+       (new-test-cmd (malinka-project-process-test-cmd test-cmd
+                                                       new-root-directory
+                                                       new-build-root-directory)))
 
   (unless (stringp name) (malinka-error "Provided non-string for project name"))
   (unless (or (not build-cmd) (stringp build-cmd))
@@ -390,22 +442,6 @@ The project is added to the global `malinka-projects-map'
   (when (assoc name malinka-projects-map)
     (malinka-delete-project name))
 
-  ;; set the compile command for projectile
-  (when (and compile-cmd root-directory)
-    (progn
-      (require 'projectile)
-      (puthash new-root-directory
-               compile-cmd
-               projectile-compilation-cmd-map)))
-
-  ;; set the test command for projectile
-  (when (and test-cmd root-directory)
-    (progn
-      (require 'projectile)
-      (puthash new-root-directory
-               test-cmd
-               projectile-test-cmd-map)))
-
   (add-to-list 'malinka-projects-map
                `(,name . ((name . ,name)
                           (compiler-executable . ,compiler-executable)
@@ -415,8 +451,8 @@ The project is added to the global `malinka-projects-map'
                           (root-directory . ,new-root-directory)
                           (same-name-check . ,same-name-check)
                           (build-cmd . ,build-cmd)
-                          (compile-cmd . ,compile-cmd)
-                          (test-cmd . ,test-cmd)
+                          (compile-cmd . ,new-compile-cmd)
+                          (test-cmd . ,new-test-cmd)
                           (build-root-directory . ,new-build-root-directory))))))
 
 (defun malinka-delete-project (name)
