@@ -828,7 +828,7 @@ If not return nil."
 		(malinka-warning "Compiled file not found during line analysis")
 		nil)
 	    ;; else
-	  `(,cd-dir ,compiler-executable ,compiled-file ,(-drop compile-start-index words))))
+	  `(,cd-dir ,compiler-executable ,compiled-file ,(-drop (+ compile-start-index 1) words))))
       ;; else
       nil)))
 
