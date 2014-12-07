@@ -552,6 +552,59 @@ No need to reinvent the wheel."
     (file-name-nondirectory (directory-file-name root-dir))))
 
 
+;;; --- malinka cmake integration ---
+(defun malinka-project-cmake? (project-map)
+  "Detect if the malinka PROJECT-MAP contains a cmake build command."
+  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
+         (words (s-split " " build-cmd))
+         (first (car words)))
+    ;; just check if the first word is cmake
+    (when (s-equals? first "cmake") t)))
+
+
+(defun malinka-cmake-compatible-version? ()
+  "Detect if we have cmake version greater than 2.8.5 to support compilation database creation"
+  (let* ((str (shell-command-to-string "cmake --version"))
+         (got-cmake (s-match "cmake version \\([0-9.]+\\)" str)))
+    (when got-cmake
+      (let ((cmake-version (nth 1 got-cmake)))
+        (malinka-debug "We got cmake version %s" cmake-version)
+        (when (> (string-to-number cmake-version) 2.85) t)))))
+
+(defun malinka-cmake-create-compiledb (project-map)
+  "Create a compilation database for a PROJECT-MAP using CMAKE."
+  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
+         (build-dir (malinka-project-map-get build-root-directory project-map))
+         (nbuild-cmd (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir build-cmd))
+         (project-name (malinka-project-map-get name project-map))
+         (process-name  (format "malinka-cmake-command-%s" project-name)))
+    (malinka-info "Executing cmake command: \"%s\"" nbuild-cmd)
+    (malinka-info "Waiting for cmake to finish")
+    (let ((process (start-process-shell-command process-name
+                                                (format "*%s*" process-name)
+                                                nbuild-cmd)))
+      (set-process-query-on-exit-flag process nil)
+      (set-process-sentinel process 'malinka-handle-cmake-finish)
+      (process-put process 'malinka-project-map project-map))))
+
+(defun malinka-handle-cmake-finish (process event)
+  "Handle all events from the project cmake command PROCESS.
+EVENT is ignored."
+  (when (memq (process-status process) '(signal exit))
+    (let* ((project-map  (process-get process 'malinka-project-map))
+           (project-name (malinka-project-map-get name project-map))
+           (build-dir     (malinka-project-map-get build-root-directory project-map))
+           (buffer       (process-buffer process))
+           (output       (with-current-buffer buffer
+                           (save-excursion
+                             (goto-char (point-min))
+                             (s-replace "\\\"" "\""
+                                        (buffer-string))))))
+      (malinka-info "Cmake command for \"%s\" finished. Proceeding to process the output" project-name)
+      (kill-buffer buffer)
+      (with-temp-buffer
+        (malinka-select-project build-dir)))))
+
 
 
 ;;; --- rtags integration ---
@@ -725,21 +778,26 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
     (malinka-compiledb-write json-string db-file-name)))
 
 (defun malinka-project-map-update-compiledb (project-map root-dir)
-  "Update the compilation database for PROJECT-MAP and ROOT-DIR."
-  (when (malinka-rtags-assert-rdm-runs)
+  "Update the compilation database for PROJECT-MAP and ROOT-DIR.
 
+If the project's build system is cmake and the cmake version is compatible then
+creation the compilation database with cmake.  Else execute the build command,
+parse the output and create the database manually."
+  (if (and (malinka-project-cmake? project-map) (malinka-cmake-compatible-version?))
+      (malinka-cmake-create-compiledb project-map)
+    ;; else execute the compile command and parse the output
     (malinka-project-execute-compile-cmd project-map root-dir)))
-
 
 
 (defun malinka-select-project (root-dir)
   "Select a malinka project at ROOT-DIR.
 A compilecommands.json compilation database must already exist there"
-  (if (f-exists? (f-join root-dir "compile_commands.json"))
-      (progn
-        (malinka-rtags-invoke-with "-W" root-dir)
-        (malinka-rtags-invoke-with "-J" root-dir))
-    (malinka-user-error "Could not find a compilation database file in directory %s" root-dir)))
+  (when (malinka-rtags-assert-rdm-runs)
+    (if (f-exists? (f-join root-dir "compile_commands.json"))
+        (progn
+          (malinka-rtags-invoke-with "-W" root-dir)
+          (malinka-rtags-invoke-with "-J" root-dir))
+      (malinka-user-error "Could not find a compilation database file in directory %s" root-dir))))
 
 (defun malinka-handle-compile-finish (process event)
   "Handle all events from the project compilation PROCESS.
