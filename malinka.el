@@ -102,7 +102,7 @@ nil
 
 (defun malinka-compiler-create (compiler)
   "Take a COMPILER and create a list of legal string values for it."
-  (list compiler (shell-command-to-string (format "which %s" compiler))))
+  (list compiler (f-full (shell-command-to-string (format "which %s" compiler)))))
 
 (defcustom malinka-supported-compilers `(,(malinka-compiler-create "gcc")
 					 ,(malinka-compiler-create "cc")
@@ -297,7 +297,9 @@ is basically any directory except known ignored directories"
    (or (s-equals? word (nth 0 it))
        (s-equals? word (nth 1 it))
        ;; unfortunately in archlinux `which gcc' returns /usr/sbin but there is a copy in /usr/bin too. Need to cover both
-       (s-equals? word (f-join "/" "usr" "bin" (nth 0 it))))
+       (s-equals? word (f-join "/" "usr" "bin" (nth 0 it)))
+       ;; if the user has ccache, then he probably uses the symlinks
+       (s-equals? word (f-join "/" "usr" "lib" "ccache" (nth 0 it))))
    malinka-supported-compilers))
 
 ;;; --- Elisp internal API
@@ -886,7 +888,7 @@ If not return nil."
 		(malinka-warning "Compiled file not found during line analysis")
 		nil)
 	    ;; else
-	  `(,cd-dir ,compiler-executable ,compiled-file ,(-drop compile-start-index words))))
+	  `(,cd-dir ,compiler-executable ,compiled-file ,(-drop (+ compile-start-index 1) words))))
       ;; else
       nil)))
 
