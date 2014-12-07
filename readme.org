@@ -1,160 +1,146 @@
 #+DESCRIPTION: A C/C++ project configuration package for Emacs
+#+OPTIONS: H:2
 
 * Information
 Malinka is a project management Emacs package for C/C++
 
-It uses rtags to help the user jump around the code easily and without the
-mistaken tag jumping that other taggers frequently have with C/C++ code.
+It acts as a glue between different C/C++ packages to provide them with the
+right data for a project. All the data are organized and can be configured on a per project basis.
+The packages that malinka can work with are:
+
+** Rtags
+Rtags help the user jump around the code easily and provide integration with many clang utilities like Clang fixits.
 The main functionality that malinka provides is to properly populate and communicate the
 compiler commands to the rtags daemons depending on the project you are working
 on.
-
-Optionally and if you also have flycheck with the clang syntax-checker activated
-malinka will communicate to flycheck's clang syntax checker the appropriate
-cpp-defines and include paths so that flycheck can do its syntax checking.
 
 If you have not installed rtags yet, visit their [[https://github.com/Andersbakken/rtags][github page]] and read more information
 about how you can acquire and use rtags. Alternatively if you used [[https://github.com/dimitri/el-get][el-get]] to get malinka
 rtags should have been downloaded and built as a dependency
 
-The way to define a project is by using `malinka-define-project' and to provide
-the basic attributes that a project needs.  For more information you can read
-the function's docstring.
+** Flycheck
+Optionally and if you also have [[https://github.com/flycheck/flycheck][flycheck]] with the clang syntax-checker activated,
+malinka will communicate to flycheck's clang syntax checker the appropriate
+=cpp-defines= and =include-paths= so that flycheck can do its syntax checking.
+
+** Projectile
+If you are using [[https://github.com/bbatsov/projectile][projectile]] then malinka can provide projectile with the compile and test commands
+to build and test your project respectively. Projectile also helps with the detection
+of root directory for projects.
+
+** Irony
+If you are using [[https://github.com/Sarcasm/irony-mode][irony mode]] malinka can then provide the json compilation database for your project
+that will be indexed by the irony server
 
 * Example Setup
 :PROPERTIES:
 :CUSTOM_ID: example_setup
 :END:
 Working with malinka requires that you define your project somewhere in your emacs
-file using `malinka-define-project'. There are various way to define the attributes
-of a C/C++ project.
+file using =(malinka-define-project)=.
 
-** Manual Setup
 #+BEGIN_SRC emacs-lisp
 (require 'malinka)
 
-
 (malinka-define-project
- :name "Refulib"
- :cpp-defines '("REFU_COMPILING" "REFU_LINUX_VERSION" "REFU_TEST"
-                "RF_MODULE_DF_XML" "RF_MODULE_DS_ARRAY" "RF_MODULE_DS_BARRAY"
-                "RF_MODULE_DS_LIST" "RF_MODULE_IO" "RF_MODULE_IO_TEXTFILE"
-                "RF_MODULE_REGEX" "RF_MODULE_STRINGS" "RF_MODULE_SYSTEM"
-                "RF_MODULE_THREAD" "RF_MODULE_THREADX" "RF_MODULE_TIME_DATE"
-                "RF_MODULE_TIME_TIMER" "RF_OPTION_DEFAULT_ARGUMENTS"
-                "RF_OPTION_FGETS_READ_BYTESN=512" "RF_OPTION_FILE_ADDBOM"
-                "RF_OPTION_LIST_CAPACITY_M=2"
-                "RF_OPTION_LOCALSTACKMEMORY_SIZE=1048576"
-                "RF_OPTION_REGEX_NODES_ALLOCMULTIPLIER=4"
-                "RF_OPTION_REGEX_STACKSIZE=250"
-                "RF_OPTION_STRINGX_CAPACITY_M=2"
-                "RF_OPTION_THREADX_MSGQUEUE=10" "RF_OPTION_VERBOSE_ERRORS"
-                "_FILE_OFFSET_BITS=64" "_GNU_SOURCE" "_LARGEFILE64_SOURCE"
-                "RF_MODULE_LIST_EXTRA" "RF_MODULE_LIST")
- :include-dirs '("/home/lefteris/w/Refulib/include")
- :root-directory "~/w/Refulib")
+ :name "ethereum"
+ :build-cmd "cmake .. -DCMAKE_BUILD_TYPE=Debug -DHEADLESS=1"
+ :build-root-directory "/home/lefteris/ew/cpp-ethereum/build"
+ :root-directory "/home/lefteris/ew/cpp-ethereum"
+ :compile-cmd "make -j4"
+ :test-cmd "./test/testeth")
      #+END_SRC
 
-In the above example we can see a sample definition of a project. The name should
-always be the same as the file-name of the directory where the project is located.
+In the above example we can see a sample definition of a project. Let's look at the arguments one by one.
 
-The rest of the arguments are self-explanatory. Scroll down for an even easier way
-to customize a proejct using a build-cmd. Attention should be brought to the
-`root-directory' argument. In combination with the `same-name-check' argument they define
-2 different ways to view a project.
-
-If `same-name-check' is non nil then even if a file of the same project is visited
-the c/c++ configuration will be regenerated. That is useful in situations where
-multiple versions of a project exist in different directories.
-
-Having `same-name-check' nil in those cases allows us to simultaneously develop on
-the different versions of the project which reside in the different directories and
-keep different defines and include directories for each. By default the value is true.
-
-In cases where `same-name-check' is true it also makes sense to provide the
-`root-directory' of the project as in the above example.
-
-** Automatic Setup
-
-A simpler way to define a project would be to provide a `root-directory and a
-`build-cmd'. This way malinka would attempt to parse the output of the build
-command and deduce all the project attributes. For example:
-
-#+BEGIN_SRC emacs-lisp
-(malinka-define-project
- :name "foo project"
- :build-cmd "make -f foo_project_makefile")
-#+END_SRC
-
-This way configuring the project is considerably easier and less manual
-but we are currently limited to using only Makefiles and no other build
-system. Support for other build systems should be available soon.
-* Customization
-As a user you have ample customization choices when using malinka. These are:
-- **malinka-completion-system**:
-  As a user you have a choice of the completion system to choose when selecting a defined project.
-  As inspired by [[https://github.com/flycheck/flycheck][flycheck]]'s customization there are currently two choices offered:
-    - [[http://www.emacswiki.org/emacs/InteractivelyDoThings][IDO]]: the built-in completion system with fuzzy searching. Powerful though it is, one can really
-      improve it by using [[https://github.com/lewang/flx][flx-ido]].
-
-    - [[http://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-Completion.html][Completing Read]]: The very simple and not fancy emacs built-in completion system. Is the default.
-
-- **malinka-ignored-directories**:
-  A list of directories to ignore for file searching
-
-- **malinka-supported-compilers**:
-  A list of compiler executable names that are recognized and supported by malinka.
-
-- **malinka-supported-file-types**:
-  File extensions that malinka will treat as related source files.
-
-- **malinka-files-list-populator**:
-  Decides how malinka will populate the files list of a project.
-
-    - `recursive'
-         Populates the files-list of a project by recursively searching
-         inside the root-directory of the project and gathering all files
-         whose extension is a member of `malinka-supported-file-types'.
-
-    - `build-cmd'
-         Populates the files-list of a project by using the `build-cmd'
-         argument and trying to determine the files by parsing the
-         make commands.
-
-    - `build-and-recursive'
-         Populates the files-list of a project by combining the behaviour
-         of both `recursive' and `build-cmd.' This is the default.
+** name
+This is the name of the project. This is how malinka will refer to your project everywhere. Must be unique.
+** build-cmd
+This is the command to build and configure the project for malinka. This is what malinka will use to create the
+json compilation database. There are 2 different ways to achieve this and depends on the type of build system you
+use to build your project.
+*** cmake > 2.84
+If malinka detects you are using cmake with version greater than 2.84 then it will use cmake to create
+the compilation database in the build directory.
+*** all others
+For all other cases, simple makefiles, scons, waf e.t.c. you have to provide the build command here making sure that it will
+provide visible compile output. You can simply add the =--dry-run= option in most build systems as this command should be used
+just to create the compilation database. The output will be parsed by malinka and the compilation database will be created.
+** build-root-directory
+This is the directory where the =build-cmd= and =compile-cmd= will be executed in.
+** compile-cmd
+This is the command to compile the whole project. This is what will be given to projectile's =projectile-compile-project=
+to compile your project with your chosen keybinding. Default is: =C-c p c=
+** root-directory
+This is the root directory of the project.
+** test-cmd
+This is the command to test the project. This is what will be given to projectile's =projectile-test-project=
+to test your project with your chosen keybinding. Default is: =C-c p P=
 * Usage
 As shown in the [[#example_setup][example setup]] section the basic configuration that needs to exist in order to use malinka is to define your
-projects using src_<emacs-lisp>{(malinka-define-project)}. Following that the way to interact with the defined projects is
+projects using =(malinka-define-project)= Following that the way to interact with the defined projects is
 via the following interactive API:
 
-- =(malinka-project-add-file file-name project-name)=:
-  Add a file to the given project and makes sure that the rtags daemon becomes aware of that file.
+- =(malinka-project-configure name given-root-dir)=
 
-- =(malinka-project-add-include-dir include-dir project-name given-root-dir)=:
-  Add an include directory to the given project and makes sure that all of the files set as compiled for this project
-  are aware of it. If flycheck and clang checker also exist in the user's system the include files are sent to
-  the clang syntax checker too whenever files of the project are visited.
+  You will be prompted with a list of the known projects and you will have to select the one you need to configure.
+  Basically this command will create the compilation database for your project and feed the data to the packages you use.
+  Depending on project size this may take quite a bit of time.
 
-  The =given-root-dir= argument is optional and will be asked for from the user if and only if a project root has
-  not been defined for the =project-name=.
+  The given-root-dir is optional and will only be asked if you failed to provide one in the project definition.
 
-- =(malinka-project-add-cpp-define define project-name given-root-dir)=:
-  Add an c preprocessor define to the given project and makes sure that all of the files set as compiled for this project
-  are aware of it. If flycheck and clang checker also exist in the user's system the define is also sent to
-  the clang syntax checker too whenever files of the project are visited.
+- =(malinka-project-select name given-root-dir)=
 
-  The =given-root-dir= argument is optional and will be asked for from the user if and only if a project root has
-  not been defined for the =project-name=.
+  You will be prompted with a list of the known projects and you will have to select the one you need to select.
+  Basically this command will search for the compilation database in the selected project, read it and feed
+  the data to the packages you are using.
 
-- =(malinka-project-add-cpp-define project-name given-root-dir)=:
-  Reconfigures the project by recreating the json compilation database to pass onto rtags with whatever malinka knows
-  about the project at the time the command is issued.
+  The given-root-dir is optional and will only be asked if you failed to provide one in the project definition.
 
-  This command will reload the whole configuration for the project. Depending on the size of the project it may take some
-  seconds for tags to work again.
+* Customization
+As a user you have ample customization choices when using malinka. These are:
+- *malinka-completion-system*:
+  As a user you have a choice of the completion system to choose when selecting a defined project.
+  As inspired by [[https://github.com/flycheck/flycheck][flycheck]]'s customization there are currently two choices offered:
+  - [[http://www.emacswiki.org/emacs/InteractivelyDoThings][IDO]]: the built-in completion system with fuzzy searching. Powerful though it is, one can really
+    improve it by using [[https://github.com/lewang/flx][flx-ido]].
 
+  - [[http://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-Completion.html][Completing Read]]: The very simple and not fancy emacs built-in completion system. Is the default.
+
+- *malinka-ignored-directories*:
+  A list of directories to ignore for file searching
+
+- *malinka-supported-compilers*:
+  A list of compiler executable names that are recognized and supported by malinka.
+
+- *malinka-supported-file-types*:
+  File extensions that malinka will treat as related source files.
+
+- *malinka-files-list-populator*:
+  (DEPRECATED -- will probably remove. build-cmd is the way to go)
+  Decides how malinka will populate the files list of a project.
+
+  - `recursive'
+       Populates the files-list of a project by recursively searching
+       inside the root-directory of the project and gathering all files
+       whose extension is a member of `malinka-supported-file-types'.
+
+  - `build-cmd'
+       Populates the files-list of a project by using the `build-cmd'
+       argument and trying to determine the files by parsing the
+       make commands.
+
+  - `build-and-recursive'
+       Populates the files-list of a project by combining the behaviour
+       of both `recursive' and `build-cmd.' This is the default.
+- *malinka-print-info?*:
+    If true malinka will be printing some info messages of the actions it takes.
+- *malinka-print-warning?*:
+    If true malinka will be printing warning messages in case things go wrong but can be taken care of
+- *malinka-print-debug?*:
+    If true malinka will be printing a lot of DEBUG messages. Only useful for debugging
+- *malinka-print-xdebug?*:
+    If true malinka will be printing extreme DEBUG messages. Only useful for debugging. Warning: This WILL spam the *Messages* buffer
 * Issues
 If you have problems, bugs or feature requests feel free to open an issue in [[https://github.com/LefterisJP/malinka/issues][github]]
 and I will take a look at it when I find the time.
@@ -167,15 +153,14 @@ and I will take a look at it when I find the time.
   check the =*rdm*= buffer. There you can see after a ~M-x malinka-project-configure~
   if the files are indexed properly.
 
-  If for some reason a file can't be indexed and in the =*rdm= buffer you get
+  If for some reason a file can't be indexed and in the =*rdm*= buffer you get
   something like below:
   #+BEGIN_SRC sh
   Failed to make location from [filename:line:column]
   #+END_SRC
   Then I would suggest removing the rtags cache kept under =~/.rtags= by default
-  and then redoing a ~M-x malinka-project-configure~. For now this is the only
-  solution. If a better solution is found it will be documented here.
+  and then redoing a ~M-x malinka-project-configure~. Also killing the =rdm= daemon is a good idea.
 
-* Contribution
+* Contributions
 All contributions are welcome. If you would like to help you can open a pull request with your suggested contribution.
 
