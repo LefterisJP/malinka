@@ -555,13 +555,16 @@ No need to reinvent the wheel."
 
 
 ;;; --- malinka cmake integration ---
-(defun malinka-project-cmake? (project-map)
-  "Detect if the malinka PROJECT-MAP contains a cmake build command."
-  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
-         (words (s-split " " build-cmd))
+(defun malinka-build-cmd-cmake? (build-cmd)
+  "Detect if a BUILD-CMD string contains cmake."
+  (let* ((words (s-split " " build-cmd))
          (first (car words)))
     ;; just check if the first word is cmake
     (when (s-equals? first "cmake") t)))
+
+(defun malinka-project-cmake? (project-map)
+  "Detect if the malinka PROJECT-MAP contains a cmake build command."
+  (malinka-build-cmd-cmake? (malinka-project-map-get build-cmd project-map)))
 
 
 (defun malinka-cmake-compatible-version? ()
@@ -783,7 +786,7 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
   "Update the compilation database for PROJECT-MAP and ROOT-DIR.
 
 If the project's build system is cmake and the cmake version is compatible then
-creation the compilation database with cmake.  Else execute the build command,
+create the compilation database with cmake.  Else execute the build command,
 parse the output and create the database manually."
   (if (and (malinka-project-cmake? project-map) (malinka-cmake-compatible-version?))
       (malinka-cmake-create-compiledb project-map)
@@ -974,11 +977,13 @@ is used."
       ;; else return unchanged
       input-list)))
 
-(defun malinka-build-cmd-to-str-synchronous (build-cmd root-dir)
-"Turn the BUILD-CMD of project at ROOT-DIR into a string."
-(let ((augmented-build-cmd (format "cd %s && %s" root-dir build-cmd)))
-  (malinka-debug "Augmented build cmd: %s" augmented-build-cmd)
-  (s-replace "\\\"" "\"" (shell-command-to-string augmented-build-cmd))))
+(defun malinka-augment-build-cmd (build-cmd build-dir)
+  "Augment a BUILD-CMD at the given BUILD-DIR.
+If it's a cmake command and it made it this far it means user's cmake is unable to create
+the compilation database so add VERBOSE=1 to output the compilation commands"
+  (if (malinka-build-cmd-cmake? build-cmd)
+      (format "cd %s && %s && make VERBOSE=1" build-dir build-cmd)
+    (format "cd %s && %s" build-dir build-cmd)))
 
 (defun malinka-project-execute-compile-cmd (project-map root-dir)
   "Execute the build-cmd of PROJECT-MAP with ROOT-DIR and setup the compile process."
@@ -986,7 +991,7 @@ is used."
          (project-name (malinka-project-map-get name project-map))
          (build-root-dir (malinka-project-get-build-root project-map))
          (process-name  (format "malinka-compile-command-%s" project-name))
-         (augmented-build-cmd (format "cd %s && %s" build-root-dir build-cmd)))
+         (augmented-build-cmd (malinka-augment-build-cmd build-cmd build-root-dir)))
     (malinka-info "Executing compile command: %s" augmented-build-cmd)
     (malinka-info "Waiting for compilation to finish")
     (let ((process (start-process-shell-command process-name
