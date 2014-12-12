@@ -566,6 +566,13 @@ No need to reinvent the wheel."
   "Detect if the malinka PROJECT-MAP contains a cmake build command."
   (malinka-build-cmd-cmake? (malinka-project-map-get build-cmd project-map)))
 
+(defun malinka-project-compatible-cmake? (project-map)
+  "Detect if the malinka PROJECT-MAP contains a cmake build command and if it is of a compatible version.
+
+Compatible means that it's of a big enough version in order to be able to generate a compilation database."
+  (let ((build-cmd (malinka-project-map-get build-cmd project-map)))
+    (when (and (malinka-project-cmake? project-map) (malinka-build-cmd-cmake? build-cmd)) t)))
+
 
 (defun malinka-cmake-compatible-version? ()
   "Detect if we have cmake version greater than 2.8.5 to support compilation database creation"
@@ -794,15 +801,17 @@ parse the output and create the database manually."
     (malinka-project-execute-compile-cmd project-map root-dir)))
 
 
-(defun malinka-select-project (root-dir)
-  "Select a malinka project at ROOT-DIR.
+(defun malinka-select-project (directory)
+  "Select a malinka project at DIRECTORY.
 A compilecommands.json compilation database must already exist there"
+  (let ((cdb-file (f-join directory "compile_commands.json")))
   (when (malinka-rtags-assert-rdm-runs)
-    (if (f-exists? (f-join root-dir "compile_commands.json"))
+    (if (f-exists? cdb-file)
+        (malinka-info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
         (progn
-          (malinka-rtags-invoke-with "-W" root-dir)
-          (malinka-rtags-invoke-with "-J" root-dir))
-      (malinka-user-error "Could not find a compilation database file in directory %s" root-dir))))
+          (malinka-rtags-invoke-with "-W" directory)
+          (malinka-rtags-invoke-with "-J" directory))
+      (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
 
 (defun malinka-handle-compile-finish (process event)
   "Handle all events from the project compilation PROCESS.
@@ -1094,13 +1103,15 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
 
   (malinka-info "Configuring project %s" name)
 
-  (let ((root-dir (f-canonical given-root-dir))
-        (project-map (assoc name malinka-projects-map)))
+  (let* ((root-dir (f-canonical given-root-dir))
+         (project-map (assoc name malinka-projects-map))
+         (project-build-dir (malinka-project-get-build-root project-map)))
 
     (malinka-debug "root dir is %s" root-dir)
 
     (if project-map
-        (malinka-select-project root-dir)
+        (malinka-select-project
+         (if (malinka-project-compatible-cmake? project-map) project-build-dir root-dir))
       ;; else - given project NAME not found
       (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
 
