@@ -807,8 +807,8 @@ A compilecommands.json compilation database must already exist there"
   (let ((cdb-file (f-join directory "compile_commands.json")))
   (when (malinka-rtags-assert-rdm-runs)
     (if (f-exists? cdb-file)
-        (malinka-info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
         (progn
+          (malinka-info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
           (malinka-rtags-invoke-with "-W" directory)
           (malinka-rtags-invoke-with "-J" directory))
       (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
