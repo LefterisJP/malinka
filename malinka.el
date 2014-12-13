@@ -848,18 +848,12 @@ EVENT is ignored."
 
 
 ; --- Makefile/Build command reading ---
-(defun malinka-buildcmd-line-get-file (line)
-"Process a LINE of a build command and determine the file being compiled."
-  (let* ((words (s-split " " line))
-         (last-word (car (last words))))
-    (if (malinka-file-p last-word)
-        last-word
-      ;else
-      (progn
-        (malinka-error "Could not determine the file compiled by:\n%s"
-                     line)
-        nil))))
+(defun malinka-buildcmd-line-get-file (words index)
+"Return the compiled file from a list of WORDS at the given INDEX.
 
+Note: INDEX can also be nil in which case nil is returned."
+(when index
+  (nth index words)))
 
 (defun malinka-buildcmd-line-contains-compile (line)
   "Determine whether a given LINE contains a compile command.
@@ -876,13 +870,12 @@ If not return nil."
          ;; find compile command and its starting index
          (compile-start-index (--find-index
                                (malinka-word-is-compiler it) words))
-	 (compiler-executable (when compile-start-index
-				(nth compile-start-index words)))
-	 ;; find compiled file
-	 (compiled-file-index (when compile-start-index
-				(--find-index (malinka-file-p it) words)))
-	 (compiled-file (when compiled-file-index
-			  (nth compiled-file-index words))))
+         (compiler-executable (when compile-start-index
+                                (nth compile-start-index words)))
+         ;; find compiled file
+         (compiled-file-index (when compile-start-index
+                                (--find-index (malinka-file-p it) words)))
+         (compiled-file (malinka-buildcmd-line-get-file words compile-start-index)))
 
     (if compile-start-index
 	(progn
@@ -916,6 +909,9 @@ If not return nil."
 (defun malinka-buildcmd-ignore-argument-p (arg)
   "Return true if ARG of the build command should be ignored."
   (or
+   ;; Ugly fix:since the compiled file has already been extracted ignore it here
+   ;; TODO: Rework this whole thing very soon.
+   (malinka-file-p arg)
    ;; ignore object files
    (s-ends-with? ".o" arg)
    ;; ignore -o argument
@@ -933,14 +929,14 @@ If not return nil."
     (cond
      ((s-starts-with? "-D" word)
       (let ((cpp-define (s-chop-prefix "-D" word)))
-	(malinka-sublist-add-if-not-existing input-list 0 cpp-define)))
+        (malinka-sublist-add-if-not-existing input-list 0 cpp-define)))
 
      ((s-starts-with? "-I" word)
       (let ((include-dir
              ;; TODO: think about include dirs and absolute or not
              ;; (malinka-file-make-absolute root-dir (s-chop-prefix "-I" word))))
              (s-chop-prefix "-I" word)))
-	(malinka-sublist-add-if-not-existing input-list 1 include-dir)))
+        (malinka-sublist-add-if-not-existing input-list 1 include-dir)))
 
      ((malinka-buildcmd-ignore-argument-p word)
       input-list)
