@@ -461,12 +461,15 @@ ELEM can be either a single element or another list"
       (append elem list)
       (cons elem list)))
 
-(defun malinka-defined-project-names ()
-  "Return all defined project names sorted alphabetically."
-  (let ((projects (-map
-                   (lambda (it) (cdr (assoc 'name (cdr it))))
-                   malinka-projects-map)))
-    (sort projects #'string<)))
+(defun malinka--defined-project-names ()
+  "Return all defined project names known to malinka sorted alphabetically."
+  ;; if we got emacs version >= 24.4
+  (if (require 'subr-x nil 'noerror)
+      (hash-table-keys malinka--projects-map)
+    ;; else use maphash
+    (let ((projects ()))
+      (maphash (lambda (key val) (cons key projects)) malinka--projects-map)
+      (sort projects #'string<))))
 
 (defun malinka-project-get-build-root (map)
   "Get either the build root directory or root directory of a project's MAP.
@@ -785,13 +788,13 @@ EVENT is ignored."
 
 
 ; --- Minibuffer utilities ---
-(defvar malinka-read-project-history nil
-  "`completing-read' history of `malinka-read-project'.")
+(defvar malinka--read-project-history nil
+  "`completing-read' history of `malinka--read-project'.")
 
 (defun malinka-default-project ()
 "Select a default project if possible.  If not return nil."
 (let ((name (malinka-project-detect-name)))
-  (when (-contains? (malinka-defined-project-names) name)
+  (when (-contains? (malinka--defined-project-names) name)
     name)))
 
 
@@ -982,21 +985,21 @@ The returned list has the form:
      lines)))
 
 
-(defun malinka-read-project (prompt &optional default)
+(defun malinka--read-project (prompt &optional default)
 "Select a malinka project from minibuffer with PROMPT.
 
 If DEFAULT is provided then this is shown as the default
 choice of a prompt.
 
 Returns the project as string or nil if not found."
-(let* ((candidates (malinka-defined-project-names))
+(let* ((candidates (malinka--defined-project-names))
        (input (pcase malinka-completion-system
                 (`ido (ido-completing-read prompt candidates nil
                                            'require-match default
-                                           'malinka-read-project-history
+                                           'malinka--read-project-history
                                            default))
                 (_ (completing-read prompt candidates nil 'require-match
-                                    default 'malinka-read-project-history
+                                    default 'malinka--read-project-history
                                     default)))))
   (if (string= input "")
       (user-error "No project name entered")
@@ -1013,7 +1016,7 @@ If multiple projects with the same name in different directories may
 exist then it's nice to provide the ROOT-DIR of the project to configure"
   (interactive
    (let* ((project-name
-           (malinka-read-project "Project: " (malinka-default-project)))
+           (malinka--read-project "Project: " (malinka-default-project)))
           (project-root-dir (malinka-project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
@@ -1039,7 +1042,7 @@ If multiple projects with the same name in different directories may
 exist then it's nice to provide the ROOT-DIR of the project to configure"
   (interactive
    (let* ((project-name
-           (malinka-read-project "Project: " (malinka-default-project)))
+           (malinka--read-project "Project: " (malinka-default-project)))
           (project-root-dir (malinka-project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
@@ -1067,7 +1070,7 @@ Adds the file to the project map and also makes sure that rtags
 indexes the file."
   (interactive (list
                 (read-file-name "File name: " nil (buffer-file-name) t)
-                (malinka-read-project "Project: " (malinka-default-project))))
+                (malinka--read-project "Project: " (malinka-default-project))))
   (unless (malinka-rtags-file-indexed-p file-name)
     (let* ((map (assoc project-name malinka-projects-map))
            (cmd (malinka-project-command-from-map map file-name)))
@@ -1082,7 +1085,7 @@ knows about this additional include directory."
   (interactive
    (let* ((include (read-directory-name "Directory name: "))
           (project-name
-           (malinka-read-project "Project: " (malinka-default-project)))
+           (malinka--read-project "Project: " (malinka-default-project)))
           (project-root-dir (malinka-project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
@@ -1102,7 +1105,7 @@ knows about this additional include directory."
   (interactive
    (let* ((define (read-string "Define: "))
           (project-name
-           (malinka-read-project "Project: " (malinka-default-project)))
+           (malinka--read-project "Project: " (malinka-default-project)))
           (project-root-dir (malinka-project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
