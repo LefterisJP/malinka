@@ -182,43 +182,10 @@ nil
   "The current project's compiler include directories.")
 
 ; --- Helper Macros ---
-
-(defmacro malinka-generate-project-name-getter (attribute)
-"Generate getter function for ATTRIBUTE given a project name."
-  `(defun ,(intern (format "malinka-project-name-get-%s" (symbol-name attribute)))
-     (name)
-     (let ((project-map (assoc name malinka-projects-map)))
-       (when 'project-map
-         (cdr (assoc ',attribute (cdr project-map)))))))
-
-(defmacro malinka-generate-project-map-getter (attribute)
-"Generate getter function for ATTRIBUTE given a project map."
-  `(defun ,(intern (format "malinka-project-map-get-%s" (symbol-name attribute)))
-     (map)
-       (when 'map
-         (cdr (assoc ',attribute (cdr map))))))
-
-; Instead of generating getters for everything, just use these 2 macros
-(defmacro malinka-project-name-get (attribute name)
-"Get the value of list ATTRIBUTE for project NAME."
-  `(let ((project-map (assoc ,name malinka-projects-map)))
-     (malinka-project-map-get ,attribute project-map)))
-
-(defmacro malinka-project-name-get-single (attribute name)
-"Get the value of list ATTRIBUTE for project NAME."
-  `(let ((project-map (assoc ,name malinka-projects-map)))
-     (malinka-project-map-get-single ,attribute project-map)))
-
-(defmacro malinka-project-map-get (attribute map)
-"Get the value of list ATTRIBUTE for project-map MAP."
-  `(when ,map
-     (cdr (assoc ',attribute (cdr ,map)))))
-
-(defmacro malinka-project-map-get-single (attribute map)
-"Get the value of single ATTRIBUTE for project-map MAP."
-  `(when ,map
-     (assoc ',attribute (cdr ,map))))
-
+(defmacro malinka--project-name-get (attribute name)
+  "Get the value of ATTRIBUTE for project NAME."
+  `(let ((project-map (gethash ,name malinka--projects-map)))
+     (,(intern (format "malinka--project-%s" (symbol-name attribute))) project-map)))
 
 (defmacro malinka-error (fmt &rest args)
 "Issue an internal error, by passing FMT and ARGS to (error)."
@@ -481,7 +448,7 @@ If neither exists an error is signaled"
       (if root-dir root-dir
         (malinka-error "Neither a build root directory or a root directory has been provided")))))
 
-(defun malinka-project-detect-root ()
+(defun malinka--project-detect-root ()
   "Attempts to detect the project root for the current buffer.
 
 Basically uses projectile's root searching utilities.
@@ -493,39 +460,39 @@ No need to reinvent the wheel."
     (when found-dir (file-truename found-dir))))
 
 
-(defun malinka-project-detect-name ()
+(defun malinka--project-detect-name ()
 "Detect the name of the project of the current buffer."
-  (let ((dir (malinka-project-detect-root)))
+  (let ((dir (malinka--project-detect-root)))
     (when dir
-      (malinka-project-name-from-root dir))))
+      (malinka--project-name-from-root dir))))
 
-(defun malinka-project-name-from-root (root-dir)
+(defun malinka--project-name-from-root (root-dir)
   "Deduce project name from ROOT-DIR."
   (when root-dir
     (file-name-nondirectory (directory-file-name root-dir))))
 
 
 ;;; --- malinka cmake integration ---
-(defun malinka-build-cmd-cmake? (build-cmd)
+(defun malinka--build-cmd-cmake? (build-cmd)
   "Detect if a BUILD-CMD string contains cmake."
   (let* ((words (s-split " " build-cmd))
          (first (car words)))
     ;; just check if the first word is cmake
     (when (s-equals? first "cmake") t)))
 
-(defun malinka-project-cmake? (project-map)
+(defun malinka--project-cmake? (project-map)
   "Detect if the malinka PROJECT-MAP contains a cmake build command."
-  (malinka-build-cmd-cmake? (malinka-project-map-get build-cmd project-map)))
+  (malinka--build-cmd-cmake? (malinka--project-build-cmd project-map)))
 
-(defun malinka-project-compatible-cmake? (project-map)
+(defun malinka--project-compatible-cmake? (project-map)
   "Detect if the malinka PROJECT-MAP contains a cmake build command and if it is of a compatible version.
 
 Compatible means that it's of a big enough version in order to be able to generate a compilation database."
-  (let ((build-cmd (malinka-project-map-get build-cmd project-map)))
-    (when (and (malinka-project-cmake? project-map) (malinka-build-cmd-cmake? build-cmd)) t)))
+  (when (and
+	 (malinka--project-cmake? project-map)
+	 (malinka--cmake-compatible-version?)) t))
 
-
-(defun malinka-cmake-compatible-version? ()
+(defun malinka--cmake-compatible-version? ()
   "Detect if we have cmake version greater than 2.8.5 to support compilation database creation"
   (let* ((str (shell-command-to-string "cmake --version"))
          (got-cmake (s-match "cmake version \\([0-9.]+\\)" str)))
@@ -534,12 +501,14 @@ Compatible means that it's of a big enough version in order to be able to genera
         (malinka-debug "We got cmake version %s" cmake-version)
         (when (> (string-to-number cmake-version) 2.85) t)))))
 
-(defun malinka-cmake-create-compiledb (project-map)
+
+
+(defun malinka--cmake-create-compiledb (project-map)
   "Create a compilation database for a PROJECT-MAP using CMAKE."
-  (let* ((build-cmd (malinka-project-map-get build-cmd project-map))
-         (build-dir (malinka-project-map-get build-root-directory project-map))
-         (nbuild-cmd (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir build-cmd))
-         (project-name (malinka-project-map-get name project-map))
+  (let* ((configure-cmd (malinka--project-configure-cmd project-map))
+         (build-dir (malinka--project-build-directory project-map))
+         (nbuild-cmd (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir configure-cmd))
+         (project-name (malinka--project-name project-map))
          (process-name  (format "malinka-cmake-command-%s" project-name)))
     (malinka-info "Executing cmake command: \"%s\"" nbuild-cmd)
     (malinka-info "Waiting for cmake to finish")
@@ -547,16 +516,16 @@ Compatible means that it's of a big enough version in order to be able to genera
                                                 (format "*%s*" process-name)
                                                 nbuild-cmd)))
       (set-process-query-on-exit-flag process nil)
-      (set-process-sentinel process 'malinka-handle-cmake-finish)
+      (set-process-sentinel process 'malinka--handle-cmake-finish)
       (process-put process 'malinka-project-map project-map))))
 
-(defun malinka-handle-cmake-finish (process event)
+(defun malinka--handle-cmake-finish (process event)
   "Handle all events from the project cmake command PROCESS.
 EVENT is ignored."
   (when (memq (process-status process) '(signal exit))
     (let* ((project-map  (process-get process 'malinka-project-map))
-           (project-name (malinka-project-map-get name project-map))
-           (build-dir     (malinka-project-map-get build-root-directory project-map))
+           (project-name (malinka--project-name project-map))
+           (build-dir     (malinka--project-build-directory project-map))
            (buffer       (process-buffer process))
            (output       (with-current-buffer buffer
                            (save-excursion
@@ -566,7 +535,7 @@ EVENT is ignored."
       (malinka-info "Cmake command for \"%s\" finished. Proceeding to process the output" project-name)
       (kill-buffer buffer)
       (with-temp-buffer
-        (malinka-select-project build-dir)))))
+        (malinka--select-project build-dir)))))
 
 
 
@@ -575,7 +544,7 @@ EVENT is ignored."
   "Invoke rc (rtags executable) with ARGS as arguments.
 
 Returns the output of the command as a string or nil in case of error"
-  (when (malinka-rtags-assert-rdm-runs)
+  (when (malinka--rtags-assert-rdm-runs)
     (let* ((rc (rtags-executable-find "rc"))
            (cmd (s-join " " (cons rc args))))
       (when rc
@@ -587,7 +556,7 @@ Returns the output of the command as a string or nil in case of error"
   (let ((output (s-trim (malinka-rtags-invoke-with "--is-indexed" filename))))
     (string-equal output "indexed")))
 
-(defun malinka-rtags-assert-rdm-runs ()
+(defun malinka--rtags-assert-rdm-runs ()
   "Assert that the rtags daemon is running."
   ; if the process has been messed with by outside sources clean it up
   (let ((status (if rtags-process (process-status rtags-process) nil)))
@@ -740,28 +709,30 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
 					      compile-output)))
     (malinka-compiledb-write json-string db-file-name)))
 
-(defun malinka-project-map-update-compiledb (project-map root-dir)
+(defun malinka--project-map-update-compiledb (project-map root-dir)
   "Update the compilation database for PROJECT-MAP and ROOT-DIR.
 
 If the project's build system is cmake and the cmake version is compatible then
 create the compilation database with cmake.  Else execute the build command,
 parse the output and create the database manually."
-  (if (and (malinka-project-cmake? project-map) (malinka-cmake-compatible-version?))
-      (malinka-cmake-create-compiledb project-map)
+  (if (malinka--project-compatible-cmake? project-map)
+      (malinka--cmake-create-compiledb project-map)
     ;; else execute the compile command and parse the output
     (malinka-project-execute-compile-cmd project-map root-dir)))
 
 
-(defun malinka-select-project (directory)
+(defun malinka--select-project (directory)
   "Select a malinka project at DIRECTORY.
-A compilecommands.json compilation database must already exist there"
+A compilecommands.json compilation database must already exist there.
+This feeds the compilation database to rtags."
   (let ((cdb-file (f-join directory "compile_commands.json")))
-  (when (malinka-rtags-assert-rdm-runs)
+  (when (malinka--rtags-assert-rdm-runs)
     (if (f-exists? cdb-file)
         (progn
           (malinka-info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
           (malinka-rtags-invoke-with "-W" directory)
           (malinka-rtags-invoke-with "-J" directory))
+      ;; else
       (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
 
 (defun malinka-handle-compile-finish (process event)
@@ -783,7 +754,7 @@ EVENT is ignored."
       (kill-buffer buffer)
       (malinka-project-compiledb-create project-map root-dir output)
       (with-temp-buffer
-        (malinka-select-project root-dir)))))
+        (malinka--select-project root-dir)))))
 
 
 
@@ -791,9 +762,9 @@ EVENT is ignored."
 (defvar malinka--read-project-history nil
   "`completing-read' history of `malinka--read-project'.")
 
-(defun malinka-default-project ()
+(defun malinka--default-project ()
 "Select a default project if possible.  If not return nil."
-(let ((name (malinka-project-detect-name)))
+(let ((name (malinka--project-detect-name)))
   (when (-contains? (malinka--defined-project-names) name)
     name)))
 
@@ -937,7 +908,7 @@ is used."
   "Augment a BUILD-CMD at the given BUILD-DIR.
 If it's a cmake command and it made it this far it means user's cmake is unable to create
 the compilation database so add VERBOSE=1 to output the compilation commands"
-  (if (malinka-build-cmd-cmake? build-cmd)
+  (if (malinka--build-cmd-cmake? build-cmd)
       (format "cd %s && %s && make VERBOSE=1" build-dir build-cmd)
     (format "cd %s && %s" build-dir build-cmd)))
 
@@ -1016,8 +987,8 @@ If multiple projects with the same name in different directories may
 exist then it's nice to provide the ROOT-DIR of the project to configure"
   (interactive
    (let* ((project-name
-           (malinka--read-project "Project: " (malinka-default-project)))
-          (project-root-dir (malinka-project-name-get root-directory project-name))
+           (malinka--read-project "Project: " (malinka--default-project)))
+          (project-root-dir (malinka--project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
      (list project-name given-dir)))
@@ -1025,14 +996,11 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
   (malinka-info "Configuring project %s" name)
 
   (let ((root-dir (f-canonical given-root-dir))
-        (project-map (assoc name malinka-projects-map)))
+        (project-map (gethash name malinka--projects-map)))
 
-    (malinka-debug "root dir is %s" root-dir)
-
-    (if project-map
-        (malinka-project-map-update-compiledb project-map root-dir)
-      ;; else - given project NAME not found
-      (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
+    (malinka-debug "Project's root dir is %s" root-dir)
+    (unless project-map (malinka-user-error "Could not find project map for %s" name))
+    (malinka--project-map-update-compiledb project-map root-dir)))
 
 ;;;###autoload
 (defun malinka-project-select (name given-root-dir)
@@ -1042,8 +1010,8 @@ If multiple projects with the same name in different directories may
 exist then it's nice to provide the ROOT-DIR of the project to configure"
   (interactive
    (let* ((project-name
-           (malinka--read-project "Project: " (malinka-default-project)))
-          (project-root-dir (malinka-project-name-get root-directory project-name))
+           (malinka--read-project "Project: " (malinka--default-project)))
+          (project-root-dir (malinka--project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
      (list project-name given-dir)))
@@ -1057,8 +1025,8 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
     (malinka-debug "root dir is %s" root-dir)
 
     (if project-map
-        (malinka-select-project
-         (if (malinka-project-compatible-cmake? project-map) project-build-dir root-dir))
+        (malinka--select-project
+         (if (malinka--project-compatible-cmake? project-map) project-build-dir root-dir))
       ;; else - given project NAME not found
       (malinka-user-error "Project %s is not known. Use malinka-define-project to fix this" name))))
 
@@ -1070,7 +1038,7 @@ Adds the file to the project map and also makes sure that rtags
 indexes the file."
   (interactive (list
                 (read-file-name "File name: " nil (buffer-file-name) t)
-                (malinka--read-project "Project: " (malinka-default-project))))
+                (malinka--read-project "Project: " (malinka--default-project))))
   (unless (malinka-rtags-file-indexed-p file-name)
     (let* ((map (assoc project-name malinka-projects-map))
            (cmd (malinka-project-command-from-map map file-name)))
@@ -1085,14 +1053,14 @@ knows about this additional include directory."
   (interactive
    (let* ((include (read-directory-name "Directory name: "))
           (project-name
-           (malinka--read-project "Project: " (malinka-default-project)))
-          (project-root-dir (malinka-project-name-get root-directory project-name))
+           (malinka--read-project "Project: " (malinka--default-project)))
+          (project-root-dir (malinka--project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
      (list include project-name given-dir)))
   (let ((map (assoc project-name malinka-projects-map)))
     (malinka-update-project-map map :include-dirs include-dir)
-    (malinka-project-map-update-compiledb map given-root-dir)
+    (malinka--project-map-update-compiledb map given-root-dir)
     (malinka-update-flycheck-include-dirs map)))
 
 
@@ -1105,14 +1073,14 @@ knows about this additional include directory."
   (interactive
    (let* ((define (read-string "Define: "))
           (project-name
-           (malinka--read-project "Project: " (malinka-default-project)))
-          (project-root-dir (malinka-project-name-get root-directory project-name))
+           (malinka--read-project "Project: " (malinka--default-project)))
+          (project-root-dir (malinka--project-name-get root-directory project-name))
           (given-dir (if project-root-dir project-root-dir
                        (read-directory-name "Project root: "))))
      (list define project-name given-dir)))
   (let ((map (assoc project-name malinka-projects-map)))
     (malinka-update-project-map map :cpp-defines define)
-    (malinka-project-map-update-compiledb map given-root-dir)
+    (malinka--project-map-update-compiledb map given-root-dir)
     (malinka-update-flycheck-cpp-defines map)))
 
 
@@ -1137,15 +1105,15 @@ knows about this additional include directory."
     (defun malinka-flycheck-clang-interface()
       "Configure flycheck clang's syntax checker according to what we know."
       (with-current-buffer (current-buffer)
-        (let* ((project-root (malinka-project-detect-root))
-               (project-name (malinka-project-name-from-root project-root)))
+        (let* ((project-root (malinka--project-detect-root))
+               (project-name (malinka--project-name-from-root project-root)))
           (when (malinka-configure-project-p project-name)
             (setq malinka-current-project-name project-name)
             (let ((includes-res
                    (malinka-process-relative-dirs
-                    (malinka-project-name-get include-dirs project-name)
+                    (malinka--project-name-get include-dirs project-name)
                     project-root))
-                  (cppflags-res (malinka-project-name-get cpp-defines project-name)))
+                  (cppflags-res (malinka--project-name-get cpp-defines project-name)))
               (if includes-res
                   (setq malinka-include-dirs includes-res)
                 (setq malinka-include-dirs '()))
