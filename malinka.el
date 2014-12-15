@@ -252,7 +252,7 @@ nil
 ;;   (unless norecord
 ;;   (malinka--info "[Window] Switched to %s" (buffer-file-name (current-buffer)))))
 
-;; --- Timers ---
+;;; --- Timers ---
 (defun malinka--idle-project-check ()
   "Run an idle project check for the current malinka project.
 
@@ -263,7 +263,16 @@ Run each time `malinka-idle-project-check-seconds' have passed
       (let* ((filename (buffer-file-name buffer))
              (query (malinka--file-belongs-to-project filename)))
         (when query
-          (malinka--info "File belongs to project %s" (malinka--project-name (nth 0  query))))))))
+          (let ((project  (nth 0 query))
+                (fileattr (nth 1 query)))
+            (cond
+             ((not (malinka--rtags-project-known? project))
+              (malinka--info "Rtags does not know about \"%s\". Informing it." (malinka--project-name project))
+              (malinka--project-create-or-select-compiledb project))
+             ((not (malinka--rtags-project-loaded? project))
+              (malinka--info "Rtags knows about \"%s\" but does not have it loaded. Loading it." (malinka--project-name project))
+              (malinka--try-select-project project)))))))))
+
 
 ;;; --- Utility functions ---
 (defun malinka--file-belongs-to-project (filename)
@@ -279,7 +288,6 @@ Else return nil."
              (let ((retlist
                     (-reduce-from
                      (lambda (input-list item)
-                       (malinka--info "Input list %s" input-list)
                        (if (= (length input-list) 1)
                            (let* ((thisname (malinka--file-attributes-name item))
                                   (thisdir (malinka--file-attributes-directory item))
@@ -640,7 +648,6 @@ Returns the output of the command as a string or nil in case of error"
       (when rc
         (shell-command-to-string cmd)))))
 
-
 (defun malinka--rtags-file-indexed-p (filename)
   "Ask rtags if it knows about FILENAME."
   (let ((output (s-trim (malinka--rtags-invoke-with "--is-indexed" filename))))
@@ -661,6 +668,20 @@ Returns the output of the command as a string or nil in case of error"
       ;else
       (malinka--error "Could not find rtags daemon in the system")))
 
+(defun malinka--rtags-project-loaded? (project)
+  "Check if rtags has loaded PROJECT."
+  (let* ((output (malinka--rtags-invoke-with "-w"))
+         (loadedlist (s-match "\\(.*\\) (loaded) <=" output))
+         (dir (when loadedlist (nth 1 loadedlist))))
+    (when dir
+      (f-equal? dir (malinka--project-root-directory project)))))
+
+(defun malinka--rtags-project-known? (project)
+  "Check if rtags knows about PROJECT."
+  (let* ((output       (malinka--rtags-invoke-with "-w"))
+         (project-root (malinka--project-root-directory project))
+         (loadedlist (s-match (format "%s.*" project-root) output)))
+    loadedlist))
 
 ;;; --- Functions related to creating the compilation database ---
 
@@ -735,6 +756,20 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
          (json-string (malinka--project-json-representation project-map)))
     (malinka--compiledb-write json-string db-file-name)))
 
+(defun malinka--project-create-or-select-compiledb (project)
+  "Create or select if existing PROJECT's compilation database."
+  (let* ((rootdir    (malinka--project-root-directory project))
+         (builddir   (malinka--project-build-directory project))
+         (rootcdb    (f-join rootdir "compile_commands.json"))
+         (buildcdb   (f-join builddir "compile_commands.json")))
+    (cond
+     ((f-exists? rootcdb)
+      (malinka--select-project rootdir))
+     ((f-exists? buildcdb)
+      (malinka--select-project builddir))
+     (t
+      (malinka--project-map-update-compiledb project)))))
+
 (defun malinka--project-map-update-compiledb (project-map)
   "Update the compilation database for PROJECT-MAP.
 
@@ -746,6 +781,19 @@ parse the output and create the database manually."
     ;; else execute the compile command and parse the output
     (malinka--project-execute-compile-cmd project-map)))
 
+(defun malinka--try-select-project (project)
+  "Try to find and select a compilation database in PROJECT."
+  (let* ((rootdir    (malinka--project-root-directory project))
+         (builddir   (malinka--project-build-directory project))
+         (rootcdb    (f-join rootdir "compile_commands.json"))
+         (buildcdb   (f-join builddir "compile_commands.json")))
+    (cond
+     ((f-exists? rootcdb)
+      (malinka--select-project rootdir))
+     ((f-exists? buildcdb)
+      (malinka--select-project builddir))
+     (t
+      (malinka--warning "Could not select a compilation database for \"%s\"" (malinka--project-name project))))))
 
 (defun malinka--select-project (directory)
   "Select a malinka project at DIRECTORY.
