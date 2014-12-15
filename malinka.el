@@ -97,7 +97,7 @@ nil
   "A list of directories to ignore for file searching."
   :group 'malinka
   :type '(repeat (string :tag "Ignored directory"))
-  :safe #'malinka-string-list-p
+  :safe #'malinka--string-list-p
   :package-version '(malinka . "0.2.0"))
 
 (defun malinka--compiler-create (compiler)
@@ -112,7 +112,7 @@ nil
 "A list of compiler executable names that are recognized and supported by malinka."
   :group 'malinka
   :type '(repeat (string :tag "Supported compilers"))
-  ;; :safe #'malinka-string-list-p
+  ;; :safe #'malinka--string-list-p
   :package-version '(malinka . "0.2.0"))
 
 (defcustom malinka-supported-file-types '("c" "cc" "cpp" "C" "c++" "cxx"
@@ -121,7 +121,7 @@ nil
 "File extensions that malinka will treat as related source files."
   :group 'malinka
   :type '(repeat (string :tag "Supported file types"))
-  :safe #'malinka-string-list-p
+  :safe #'malinka--string-list-p
   :package-version '(malinka . "0.2.0"))
 
 (defcustom malinka-files-list-populator 'build-and-recursive
@@ -147,6 +147,11 @@ nil
                         build-and-recursive))
   :package-version '(malinka . "0.2.0"))
 
+(defcustom malinka-mode-line "malinka"
+  "The string to show in the mode line when malinka minor mode is active."
+  :group 'malinka
+  :package-version '(malinka . "0.3.0"))
+
 (defcustom malinka-print-info? t "If true malinka will be printing some info messages of the actions it takes"
   :group 'malinka
   :type 'boolean
@@ -170,6 +175,29 @@ nil
   :type 'boolean
   :safe #'booleanp
   :package-version '(malinka . "0.3.0"))
+
+(defcustom malinka-idle-project-check-seconds 4
+  "The idle time in seconds to wait until we perform a project change check."
+  :group 'malinka
+  :type 'number)
+
+(defvar malinka--timer-idle-project-check nil
+  "The timer created by `malinka-enable-idle-project-check'.")
+
+(defcustom malinka-enable-idle-project-check t
+  "Enables idle timer for `malinka--timer-idle-project-check'."
+  :group 'malinka
+  :set (lambda (symbol value)
+         (set symbol value)
+         (when malinka--timer-idle-project-check
+           (cancel-timer malinka--timer-idle-project-check))
+         (setq malinka--timer-idle-project-check nil)
+         (when malinka-enable-idle-project-check
+           (setq malinka--timer-idle-project-check
+                 (run-with-idle-timer
+                  malinka-idle-project-check-seconds
+                  t
+                  'malinka--idle-project-check)))))
 
 ;;; --- Global project variables ---
 
@@ -215,7 +243,60 @@ nil
   `(when malinka-print-xdebug?
      (message (concat "Malinka-xdebug: " ,fmt) ,@args)))
 
+;;; --- Advices ---
+;; (defun malinka--switch-to-buffer (buffer-or-name &optional
+;;                                                  norecord force-same-window)
+;;   (unless norecord
+;;   (malinka--info "[Buffer]Switched to %s" buffer-or-name)))
+;; (defun malinka--select-window (window &optional norecord)
+;;   (unless norecord
+;;   (malinka--info "[Window] Switched to %s" (buffer-file-name (current-buffer)))))
+
+;; --- Timers ---
+(defun malinka--idle-project-check ()
+  "Run an idle project check for the current malinka project.
+
+Run each time `malinka-idle-project-check-seconds' have passed
+ and `malinka-enable-idle-project-check' is non nil."
+  (let ((buffer (current-buffer)))
+    (when (malinka--buffer-is-c? buffer)
+      (let* ((filename (buffer-file-name buffer))
+             (query (malinka--file-belongs-to-project filename)))
+        (when query
+          (malinka--info "File belongs to project %s" (malinka--project-name (nth 0  query))))))))
+
 ;;; --- Utility functions ---
+(defun malinka--file-belongs-to-project (filename)
+  "Determines if the FILENAME belongs to a known malinka project.
+
+If it does returns a tuple with the `malinka--project' and  the
+ `malinka--file-attributes' item of the file.
+Else return nil."
+  (let ((found)
+        (found-project)
+        (fileattr))
+  (maphash (lambda (name project)
+             (let ((retlist
+                    (-reduce-from
+                     (lambda (input-list item)
+                       (malinka--info "Input list %s" input-list)
+                       (if (= (length input-list) 1)
+                           (let* ((thisname (malinka--file-attributes-name item))
+                                  (thisdir (malinka--file-attributes-directory item))
+                                  (thispath (f-join thisdir thisname)))
+                             (if (f-equal? filename thispath)
+                          (add-to-list 'input-list item)
+                        input-list))
+                  ;; else input list already contains an item so just return it
+                  input-list))
+                     '(filename) (malinka--project-files-list project))))
+               (when (= (length retlist) 2)
+                 (setq found-project project)
+                 (setq fileattr (nth 2 retlist)))))
+                 malinka--projects-map)
+  (when found-project
+    `(,found-project ,fileattr))))
+
 
 (defun malinka--process-relative-dirs (input-list project-root)
   "Process the INPUT-LIST and return relative dirs to PROJECT-ROOT."
@@ -224,8 +305,13 @@ nil
    (s-prepend project-root it) input-list))
 
 ;;; --- Predicate functions ---
+(defun malinka--buffer-is-c? (buffer)
+  "Checks if buffer is of C/C++ mode"
+  (let ((mode (with-current-buffer buffer major-mode)))
+    (or (string-equal mode "c++-mode") (string-equal mode "c-mode"))))
 
-(defun malinka-string-list-p (obj)
+
+(defun malinka--string-list-p (obj)
   "Determine if OBJ is a list of strings.
 Copied from flycheck.el and not used directly to not introduce dependency"
   (and (listp obj) (-all? #'stringp obj)))
@@ -952,6 +1038,22 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
          (if (malinka--project-compatible-cmake? project-map) project-build-dir root-dir))
       ;; else - given project NAME not found
       (malinka-user-error "Project %s is not known.  Use malinka-define-project to fix this" name))))
+
+;;;###autoload
+(define-minor-mode malinka-mode
+  "TODO: doc"
+  :lighter malinka-mode-line
+  :group 'malinka
+  :require 'malinka
+  :global t
+  (cond (malinka-mode
+         ;; (advice-add 'switch-to-buffer :before  #'malinka--switch-to-buffer)
+         ;; (advice-add 'select-window :before  #'malinka--select-window))
+         )
+        (t
+         ;; (advice-remove 'switch-to-buffer #'malinka--switch-to-buffer)
+         ;; (advice-remove 'select-window #'malinka--select-window))
+        )))
 
 ;;; --- Interface with flycheck if existing ---
 ;;; TODO: update this soon
