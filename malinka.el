@@ -118,11 +118,18 @@ nil
 (defcustom malinka-supported-file-types '("c" "cc" "cpp" "C" "c++" "cxx"
                                           "h" "hh" "hpp" "H" "h++" "cxx"
                                           "tcc")
-"File extensions that malinka will treat as related source files."
+  "File extensions that malinka will treat as related source and header files."
   :group 'malinka
   :type '(repeat (string :tag "Supported file types"))
   :safe #'malinka--string-list-p
   :package-version '(malinka . "0.2.0"))
+
+(defcustom malinka-supported-header-types '("h" "hh" "hpp" "H" "h++")
+  "File extensions that malinka will treat as related header files."
+  :group 'malinka
+  :type '(repeat (string :tag "Supported file types"))
+  :safe #'malinka--string-list-p
+  :package-version '(malinka . "0.3.0"))
 
 (defcustom malinka-files-list-populator 'build-and-recursive
 "Decides how malinka will populate the files list of a project.
@@ -184,7 +191,7 @@ nil
 (defvar malinka--timer-idle-project-check nil
   "The timer created by `malinka-enable-idle-project-check'.")
 
-(defcustom malinka-enable-idle-project-check t
+(defcustom malinka-enable-idle-project-check nil
   "Enables idle timer for `malinka--timer-idle-project-check'."
   :group 'malinka
   :set (lambda (symbol value)
@@ -243,15 +250,6 @@ nil
   `(when malinka-print-xdebug?
      (message (concat "Malinka-xdebug: " ,fmt) ,@args)))
 
-;;; --- Advices ---
-;; (defun malinka--switch-to-buffer (buffer-or-name &optional
-;;                                                  norecord force-same-window)
-;;   (unless norecord
-;;   (malinka--info "[Buffer]Switched to %s" buffer-or-name)))
-;; (defun malinka--select-window (window &optional norecord)
-;;   (unless norecord
-;;   (malinka--info "[Window] Switched to %s" (buffer-file-name (current-buffer)))))
-
 ;;; --- Timers ---
 (defun malinka--idle-project-check ()
   "Run an idle project check for the current malinka project.
@@ -263,12 +261,13 @@ Run each time `malinka-idle-project-check-seconds' have passed
       (let* ((filename (buffer-file-name buffer))
              (query (malinka--file-belongs-to-project filename)))
         (when query
-          (let ((project  (nth 0 query))
-                (fileattr (nth 1 query)))
+          (let ((project  (if (listp query) (nth 0 query) query)))
+            (malinka--rtags-assert-rdm-runs)
             (cond
              ((not (malinka--rtags-project-known? project))
               (malinka--info "Rtags does not know about \"%s\". Informing it." (malinka--project-name project))
               (malinka--project-create-or-select-compiledb project))
+
              ((not (malinka--rtags-project-loaded? project))
               (malinka--info "Rtags knows about \"%s\" but does not have it loaded. Loading it." (malinka--project-name project))
               (malinka--try-select-project project)))))))))
@@ -278,32 +277,60 @@ Run each time `malinka-idle-project-check-seconds' have passed
 (defun malinka--file-belongs-to-project (filename)
   "Determines if the FILENAME belongs to a known malinka project.
 
-If it does returns a tuple with the `malinka--project' and  the
- `malinka--file-attributes' item of the file.
+If it does and is configured then return a tuple with the `malinka--project'
+ and  the `malinka--file-attributes' item of the file.
+If it does but no file attribute can be found then only return the
+ `malinka--project' it should belong to.
 Else return nil."
-  (let ((found)
-        (found-project)
-        (fileattr))
-  (maphash (lambda (name project)
-             (let ((retlist
-                    (-reduce-from
-                     (lambda (input-list item)
-                       (if (= (length input-list) 1)
-                           (let* ((thisname (malinka--file-attributes-name item))
-                                  (thisdir (malinka--file-attributes-directory item))
-                                  (thispath (f-join thisdir thisname)))
-                             (if (f-equal? filename thispath)
-                          (add-to-list 'input-list item)
-                        input-list))
-                  ;; else input list already contains an item so just return it
-                  input-list))
-                     '(filename) (malinka--project-files-list project))))
-               (when (= (length retlist) 2)
-                 (setq found-project project)
-                 (setq fileattr (nth 2 retlist)))))
-                 malinka--projects-map)
-  (when found-project
-    `(,found-project ,fileattr))))
+  ;; check which project the file may belong to
+  (let ((found-projects '()))
+    (maphash (lambda (name project)
+               (let ((rootdir (malinka--project-root-directory project)))
+                 (when (f-descendant-of? filename rootdir)
+                   (let ((distance-from-root (length (f-split (f-relative filename rootdir)))))
+                     (add-to-list 'found-projects `(,project ,distance-from-root))))))
+             malinka--projects-map)
+
+    (cond
+     ((not found-projects) nil)
+
+     (t ;; if it belongs to any project, find the one whose root it is closest to
+      (let* ((matched-list
+              (-reduce-from (lambda (return item)
+                              (let ((project (nth 0 item))
+                                    (distance-from-root (nth 1 item))
+                                    (other-distance (nth 1 return)))
+                                (if (< distance-from-root other-distance)
+                                    `(,project ,distance-from-root)
+                                  return)))
+                            (nth 0 found-projects) found-projects))
+             (matched-project (nth 0 matched-list)))
+
+        ;; if it's a header we won't have any configured attributes. Return match.
+        (if (malinka--cheader? filename)
+            matched-project
+          ;; else try to find the configured file attributes in the malinka project
+          (let ((fileattr-retlist
+                 (-reduce-from
+                  (lambda (input-list item)
+                    (if (= (length input-list) 1)
+                        (let* ((thisname (malinka--file-attributes-name item))
+                               (thisdir (malinka--file-attributes-directory item))
+                               (thispath (f-join thisdir thisname)))
+                          (if (f-equal? filename thispath)
+                              (add-to-list 'input-list item)
+                            input-list))
+                      ;; else input list already contains an item so just return it
+                      input-list))
+                  '(filename) (malinka--project-files-list matched-project))))
+            (cond
+             ((= (length fileattr-retlist) 1)
+              ;; source file under project but no file attribute. Probably not configured yet.
+              matched-project)
+             ((= (length fileattr-retlist) 2)
+              `(,matched-project (nth 1 fileattr-retlist)))
+             (t
+              (malinka--error "Should never happen.  Too many list elements returned"))))))))))
 
 
 (defun malinka--process-relative-dirs (input-list project-root)
@@ -340,6 +367,10 @@ the current project."
 (defun malinka--cfile? (file)
   "Return non-nil only if the FILE is related to C/C++."
   (-contains? malinka-supported-file-types (f-ext file)))
+
+(defun malinka--cheader? (file)
+  "Return non-nil only if the FILE is a C/C++ header."
+  (-contains? malinka-supported-header-types (f-ext file)))
 
 (defun malinka--word-is-compiler? (word)
   "Determine if WORD is a compiler command."
