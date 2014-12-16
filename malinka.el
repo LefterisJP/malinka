@@ -6,7 +6,7 @@
 ;; Author: Lefteris Karapetsas <lefteris@refu.co>
 ;; URL: https://github.com/LefterisJP/malinka
 ;; Keywords: c c++ project-management
-;; Version: 0.3.0
+;; Version: 0.3.1
 ;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (cl-lib "0.3") (rtags "0.0") (projectile "0.11.0"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -601,13 +601,24 @@ Compatible means that it's of a big enough version in order to be able to genera
 (defun malinka--cmake-compatible-version? ()
   "Detect if we have cmake version greater than 2.8.5 to support compilation database creation"
   (let* ((str (shell-command-to-string "cmake --version"))
-         (got-cmake (s-match "cmake version \\([0-9.]+\\)" str)))
+         (got-cmake (s-match "cmake version \\([0-9]+\\)\.\\([0-9]+\\)\.\\([0-9]+\\)" str)))
     (when got-cmake
-      (let ((cmake-version (nth 1 got-cmake)))
-        (malinka--debug "We got cmake version %s" cmake-version)
-        (when (> (string-to-number cmake-version) 2.85) t)))))
-
-
+      (let ((major-version (string-to-number (nth 1 got-cmake)))
+			(minor-version (string-to-number(nth 2 got-cmake)))
+			(patch-version (string-to-number(nth 3 got-cmake))))
+        (malinka--debug "We got cmake version %s.%s.%s" major-version
+						minor-version
+						patch-version)
+		(cond
+		 ((>= major-version 3) t)
+		 ((= major-version 2)
+		  (cond
+		   ((= minor-version 8)
+			(if (>= patch-version 5) t nil))
+		   ((> minor-version 8) t)
+		   ((< minor-version 8) nil)))
+		 (t ;; major version being 1 means not supported
+		  nil))))))
 
 (defun malinka--cmake-create-compiledb (project-map)
   "Create a compilation database for a PROJECT-MAP using CMAKE."
