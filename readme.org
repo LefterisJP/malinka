@@ -44,9 +44,9 @@ file using =(malinka-define-project)=.
 
 (malinka-define-project
  :name "ethereum"
- :build-cmd "cmake .. -DCMAKE_BUILD_TYPE=Debug -DHEADLESS=1"
- :build-root-directory "/home/lefteris/ew/cpp-ethereum/build"
  :root-directory "/home/lefteris/ew/cpp-ethereum"
+ :build-directory "/home/lefteris/ew/cpp-ethereum/build"
+ :configure-cmd "cmake .. -DCMAKE_BUILD_TYPE=Debug -DHEADLESS=1"
  :compile-cmd "make -j4"
  :test-cmd "./test/testeth")
      #+END_SRC
@@ -55,24 +55,26 @@ In the above example we can see a sample definition of a project. Let's look at 
 
 ** name
 This is the name of the project. This is how malinka will refer to your project everywhere. Must be unique.
-** build-cmd
-This is the command to build and configure the project for malinka. This is what malinka will use to create the
+** root-directory
+This is the root directory of the project.
+
+** build-directory
+This is the directory where the =build-cmd= and =compile-cmd= will be executed in.
+
+** configure-cmd
+This is the command to configure the project for malinka. This is what malinka will use to create the
 json compilation database. There are 2 different ways to achieve this and depends on the type of build system you
 use to build your project.
-*** cmake > 2.84
-If malinka detects you are using cmake with version greater than 2.84 then it will use cmake to create
+*** cmake > 2.85
+If malinka detects you are using cmake with version greater than 2.85 then it will use cmake to create
 the compilation database in the build directory.
 *** all others
 For all other cases, simple makefiles, scons, waf e.t.c. you have to provide the build command here making sure that it will
 provide visible compile output. You can simply add the =--dry-run= option in most build systems as this command should be used
 just to create the compilation database. The output will be parsed by malinka and the compilation database will be created.
-** build-root-directory
-This is the directory where the =build-cmd= and =compile-cmd= will be executed in.
 ** compile-cmd
 This is the command to compile the whole project. This is what will be given to projectile's =projectile-compile-project=
 to compile your project with your chosen keybinding. Default is: =C-c p c=
-** root-directory
-This is the root directory of the project.
 ** test-cmd
 This is the command to test the project. This is what will be given to projectile's =projectile-test-project=
 to test your project with your chosen keybinding. Default is: =C-c p P=
@@ -96,6 +98,17 @@ via the following interactive API:
   the data to the packages you are using.
 
   The given-root-dir is optional and will only be asked if you failed to provide one in the project definition.
+* Operation
+Malinka will attempt to feed data to all the C/C++ relevant packages that it can detect while a buffer of
+a malinka project is currently visited.
+** Idle Check
+If `malinka-enable-idle-project-check' is non-nil then at the specified interval of
+`malinka-idle-project-check-seconds' the visited buffer's file will be checked against
+all the known malinka projects.
+
+If it is found to be under a project's root then that project is considered the current
+project and is selected by malinka. Selection basically means feeding the appropriate
+data to each of the other C/C++ packages.
 
 * Customization
 As a user you have ample customization choices when using malinka. These are:
@@ -114,25 +127,18 @@ As a user you have ample customization choices when using malinka. These are:
   A list of compiler executable names that are recognized and supported by malinka.
 
 - *malinka-supported-file-types*:
-  File extensions that malinka will treat as related source files.
+  File extensions that malinka will treat as related source and header files.
 
-- *malinka-files-list-populator*:
-  (DEPRECATED -- will probably remove. build-cmd is the way to go)
-  Decides how malinka will populate the files list of a project.
+- *malinka-supported-header-types*:
+  File extensions that malinka will treat as related header files.
 
-  - `recursive'
-       Populates the files-list of a project by recursively searching
-       inside the root-directory of the project and gathering all files
-       whose extension is a member of `malinka-supported-file-types'.
+- *malinka-enable-idle-project-check*:
+  If set to non-nil, then malinka will run some project [[Idle Check][checks]] during the editor's
+  idle time.
 
-  - `build-cmd'
-       Populates the files-list of a project by using the `build-cmd'
-       argument and trying to determine the files by parsing the
-       make commands.
+- *malinka-idle-project-check-seconds*:
+  The idle time in seconds to wait until we perform a project change check.
 
-  - `build-and-recursive'
-       Populates the files-list of a project by combining the behaviour
-       of both `recursive' and `build-cmd.' This is the default.
 - *malinka-print-info?*:
     If true malinka will be printing some info messages of the actions it takes.
 - *malinka-print-warning?*:

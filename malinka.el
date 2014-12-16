@@ -131,29 +131,6 @@ nil
   :safe #'malinka--string-list-p
   :package-version '(malinka . "0.3.0"))
 
-(defcustom malinka-files-list-populator 'build-and-recursive
-"Decides how malinka will populate the files list of a project.
-
-`recursive'
-     Populates the files-list of a project by recursively searching
-     inside the root-directory of the project and gathering all files
-     whose extension is a member of `malinka-supported-file-types'.
-
-`build-cmd'
-     Populates the files-list of a project by using the `build-cmd'
-     argument and trying to determine the files by parsing the
-     make commands.
-
-`build-and-recursive'
-     Populates the files-list of a project by combining the behaviour
-     of both `recursive' and `build-cmd.' This is the default."
-  :group 'malinka
-  :type '(choice (const :tag "Recursive file search" recursive)
-                 (const :tag "Build command file search" build-cmd)
-                 (const :tag "Build command and recursive file search"
-                        build-and-recursive))
-  :package-version '(malinka . "0.2.0"))
-
 (defcustom malinka-mode-line "malinka"
   "The string to show in the mode line when malinka minor mode is active."
   :group 'malinka
