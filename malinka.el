@@ -238,9 +238,21 @@ Run each time `malinka-idle-project-check-seconds' have passed
       (let* ((filename (buffer-file-name buffer))
              (query (malinka--file-belongs-to-project filename)))
         (when query
-          (let ((project  (if (listp query) (nth 0 query) query)))
+          (let ((project  (nth 0 query))
+				(fileattr (nth 1 query)))
             (malinka--rtags-assert-rdm-runs)
-            (cond
+			(cond
+             ;; if file check results show that the project is not configured
+             ;; nothing is being configured right now
+             ;; and it's not a cmake 2.8.5 project then configure it
+             ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+             ((and (eq fileattr 'not-configured)
+                   (not (malinka--project-compatible-cmake? project))
+                   (not (malinka--rtags-is-indexing?))
+                   (not (malinka--project-being-configured? project)))
+              (malinka--info "Project \"%s\" does not seem to be configured. Configuring ..." (malinka--project-name project))
+              (malinka--project-map-update-compiledb project))
+             ;; else make sure that rtags knows about it
              ((not (malinka--rtags-project-known? project))
               (malinka--info "Rtags does not know about \"%s\". Informing it." (malinka--project-name project))
               (malinka--project-create-or-select-compiledb project))
@@ -251,64 +263,95 @@ Run each time `malinka-idle-project-check-seconds' have passed
 
 
 ;;; --- Utility functions ---
+(defun malinka--file-indexed-by-project (filepath project)
+  "Check if FILEPATH is indexed by PROJECT.
+
+This function assumes that we do know that `filepath' belongs to `project'.
+If `filepath' is a header file the 'header symbol is returned.
+If `project' has a `malinka--file-attributes' for the file it is returned.
+If not then the 'not-configured symbol is returned."
+  ;; if it's a header we won't have any configured attributes. Return nil
+  (if (malinka--cheader? filepath)
+	  (intern "header")
+	;; else try to find the configured file attributes in the malinka project
+	(let ((fileattr-retlist
+		   (-reduce-from
+			(lambda (input-list item)
+			  (if (= (length input-list) 1)
+				  (let* ((thisname (malinka--file-attributes-name item))
+						 (thisdir (malinka--file-attributes-directory item))
+						 (thispath (f-join thisdir thisname)))
+					(if (f-equal? filepath thispath)
+						(add-to-list 'input-list item)
+					  input-list))
+				;; else input list already contains an item so just return it
+				input-list))
+			'(filename) (malinka--project-files-list project))))
+	  (cond
+	   ((= (length fileattr-retlist) 1)
+		;; source file under project but no file attribute. Probably not configured yet.
+		(intern "not-configured"))
+	   ((= (length fileattr-retlist) 2)
+		(nth 1 fileattr-retlist))
+	   (t
+		(malinka--error "Should never happen.  Too many list elements returned"))))))
+
+(defun malinka--file-find-closest-project (filename found-projects)
+  "Find the closest project match for FILENAME from FOUND-PROJECTS.
+`found-projects' should be a list of tuples of the form
+ (project distance-from-root) or nil.  Where distance-from-root is `filename''s
+distance from the project's root directory.
+
+If it does and is configured then return a tuple with the `malinka--project'
+ and  the `malinka--file-attributes' item of the file.
+If it does but no file attribute can be found then return a tuple with
+ `malinka--project' it should belong to and the symbol 'not-configured.
+If it does but but is a header file then return a tuple with
+ `malinka--project' it should belong to and the symbol 'header
+Else return nil."
+  (when found-projects
+    (let* ((matched-list
+            (-reduce-from (lambda (return item)
+                            (let ((project (nth 0 item))
+                                  (distance-from-root (nth 1 item))
+                                  (other-distance (nth 1 return)))
+                              (if (< distance-from-root other-distance)
+                                  `(,project ,distance-from-root)
+                                return)))
+                          (nth 0 found-projects) found-projects))
+           (matched-project (nth 0 matched-list))
+           (index-result (malinka--file-indexed-by-project filename matched-project)))
+      (cond
+       ((malinka--file-attributes-p index-result)
+        `(,matched-project ,index-result))
+       ((eq index-result 'header)
+        `(,matched-project ,(intern "header")))
+       ((eq index-result 'not-configured)
+        `(,matched-project ,(intern "not-configured")))
+       (t
+        (malinka--error "Should never happen.  Unexpected return value"))))))
+
 (defun malinka--file-belongs-to-project (filename)
   "Determines if the FILENAME belongs to a known malinka project.
 
 If it does and is configured then return a tuple with the `malinka--project'
  and  the `malinka--file-attributes' item of the file.
-If it does but no file attribute can be found then only return the
- `malinka--project' it should belong to.
+If it does but no file attribute can be found then return a tuple with
+ `malinka--project' it should belong to and the symbol 'not-configured.
+If it does but but is a header file then return a tuple with
+ `malinka--project' it should belong to and the symbol 'header
 Else return nil."
   ;; check which project the file may belong to
   (let ((found-projects '()))
     (maphash (lambda (name project)
                (let ((rootdir (malinka--project-root-directory project)))
                  (when (f-descendant-of? filename rootdir)
-                   (let ((distance-from-root (length (f-split (f-relative filename rootdir)))))
-                     (add-to-list 'found-projects `(,project ,distance-from-root))))))
+                   (let ((distance-from-root
+                          (length (f-split (f-relative filename rootdir)))))
+                     (add-to-list 'found-projects
+                                  `(,project ,distance-from-root))))))
              malinka--projects-map)
-
-    (cond
-     ((not found-projects) nil)
-
-     (t ;; if it belongs to any project, find the one whose root it is closest to
-      (let* ((matched-list
-              (-reduce-from (lambda (return item)
-                              (let ((project (nth 0 item))
-                                    (distance-from-root (nth 1 item))
-                                    (other-distance (nth 1 return)))
-                                (if (< distance-from-root other-distance)
-                                    `(,project ,distance-from-root)
-                                  return)))
-                            (nth 0 found-projects) found-projects))
-             (matched-project (nth 0 matched-list)))
-
-        ;; if it's a header we won't have any configured attributes. Return match.
-        (if (malinka--cheader? filename)
-            matched-project
-          ;; else try to find the configured file attributes in the malinka project
-          (let ((fileattr-retlist
-                 (-reduce-from
-                  (lambda (input-list item)
-                    (if (= (length input-list) 1)
-                        (let* ((thisname (malinka--file-attributes-name item))
-                               (thisdir (malinka--file-attributes-directory item))
-                               (thispath (f-join thisdir thisname)))
-                          (if (f-equal? filename thispath)
-                              (add-to-list 'input-list item)
-                            input-list))
-                      ;; else input list already contains an item so just return it
-                      input-list))
-                  '(filename) (malinka--project-files-list matched-project))))
-            (cond
-             ((= (length fileattr-retlist) 1)
-              ;; source file under project but no file attribute. Probably not configured yet.
-              matched-project)
-             ((= (length fileattr-retlist) 2)
-              `(,matched-project (nth 1 fileattr-retlist)))
-             (t
-              (malinka--error "Should never happen.  Too many list elements returned"))))))))))
-
+    (malinka--file-find-closest-project filename found-projects)))
 
 (defun malinka--process-relative-dirs (input-list project-root)
   "Process the INPUT-LIST and return relative dirs to PROJECT-ROOT."
@@ -340,6 +383,13 @@ the current project."
       (if (cdr (assoc 'same-name-check (cdr project-map)))
           (not (string= malinka--current-project-name name))
         t))))
+
+(defun malinka--project-being-configured? (project)
+  "Check if project is currently being configured."
+  (let* ((name      (malinka--project-name project))
+		 (buffname  (format "*malinka-compile-command-%s*" name))
+		 (buffname2 (format "*malinka-compile-command-%s*" name)))
+	(when (or (get-buffer buffname) (get-buffer buffname2)) t)))
 
 (defun malinka--cfile? (file)
   "Return non-nil only if the FILE is related to C/C++."
@@ -686,6 +736,11 @@ Returns the output of the command as a string or nil in case of error"
       t
       ;else
       (malinka--error "Could not find rtags daemon in the system")))
+
+(defun malinka--rtags-is-indexing? ()
+  "Check if rtags is currently indexing anything"
+  (let ((result (string-to-number (malinka--rtags-invoke-with "--is-indexing"))))
+    (when (= result 1) t)))
 
 (defun malinka--rtags-project-loaded? (project)
   "Check if rtags has loaded PROJECT."
