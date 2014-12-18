@@ -239,9 +239,9 @@ Run each time `malinka-idle-project-check-seconds' have passed
              (query (malinka--file-belongs-to-project filename)))
         (when query
           (let ((project  (nth 0 query))
-				(fileattr (nth 1 query)))
+		(fileattr (nth 1 query)))
             (malinka--rtags-assert-rdm-runs)
-			(cond
+	    (cond
              ;; if file check results show that the project is not configured
              ;; nothing is being configured right now
              ;; and it's not a cmake 2.8.5 project then configure it
@@ -272,29 +272,22 @@ If `project' has a `malinka--file-attributes' for the file it is returned.
 If not then the 'not-configured symbol is returned."
   ;; if it's a header we won't have any configured attributes. Return nil
   (if (malinka--cheader? filepath)
-	  (intern "header")
-	;; else try to find the configured file attributes in the malinka project
-	(let ((fileattr-retlist
-		   (-reduce-from
-			(lambda (input-list item)
-			  (if (= (length input-list) 1)
-				  (let* ((thisname (malinka--file-attributes-name item))
-						 (thisdir (malinka--file-attributes-directory item))
-						 (thispath (f-join thisdir thisname)))
-					(if (f-equal? filepath thispath)
-						(add-to-list 'input-list item)
-					  input-list))
-				;; else input list already contains an item so just return it
-				input-list))
-			'(filename) (malinka--project-files-list project))))
-	  (cond
-	   ((= (length fileattr-retlist) 1)
-		;; source file under project but no file attribute. Probably not configured yet.
-		(intern "not-configured"))
-	   ((= (length fileattr-retlist) 2)
-		(nth 1 fileattr-retlist))
-	   (t
-		(malinka--error "Should never happen.  Too many list elements returned"))))))
+      (intern "header")
+    ;; else try to find the configured file attributes in the malinka project
+    (let ((fileattr
+           (-reduce-from
+            (lambda (input item)
+              (if (not input)
+                  (let* ((thisname (malinka--file-attributes-name item))
+                         (thisdir (malinka--file-attributes-directory item))
+                         (thispath (f-join thisdir thisname)))
+                    (when (f-equal? filepath thispath) item))
+                ;; else input is an actual value so still return it
+                input)) nil (malinka--project-files-list project))))
+
+      (if fileattr fileattr
+        ;; else
+        (intern "not-configured")))))
 
 (defun malinka--file-find-closest-project (filename found-projects)
   "Find the closest project match for FILENAME from FOUND-PROJECTS.
@@ -329,7 +322,7 @@ Else return nil."
        ((eq index-result 'not-configured)
         `(,matched-project ,(intern "not-configured")))
        (t
-        (malinka--error "Should never happen.  Unexpected return value"))))))
+        (malinka--error "Should never happen.  Unexpected index-result: %s" index-result))))))
 
 (defun malinka--file-belongs-to-project (filename)
   "Determines if the FILENAME belongs to a known malinka project.
@@ -561,9 +554,9 @@ The project is added to the global `malinka--projects-map'"
 	     malinka--projects-map)))
 
 (defun malinka--project-add-file (project
-				  name directory
-				  executable defines
-				  includes arguments)
+                                  name directory
+                                  executable defines
+                                  includes arguments)
   "Add a new files' attributes to a PROJECT.
 
 NAME is the name of the file without the directory.  DIRECTORY is the directory
@@ -926,6 +919,12 @@ Note: INDEX can also be nil in which case nil is returned."
 (when index
   (nth index words)))
 
+(defun malinka--includes-make-absolute (includes project)
+  "Return the INCLUDES list of PROJECT with all relative paths turned absolute."
+  (let ((build-dir (malinka--project-build-directory project)))
+    (-map-when 'f-relative (lambda (path) (f-join build-dir path)) includes)))
+
+
 (defun malinka--sublist-add-if-not-existing (attribute-list ind element)
   "Add to ATTRIBUTE-LIST's IND sublist ELEMENT, if it does not already exist.
 
@@ -994,7 +993,7 @@ The given ATTRIBUTES-LIST is in the form: '(DEFINES INCLUDES ARGUMENTS)"
 
 The returned compile attributes are in the form:
 '(DEFINES INCLUDES ARGUMENTS)"
-    (-reduce-from 'malinka--configoutput-process-word '() words))
+    (-reduce-from 'malinka--configoutput-process-word '(nil nil nil) words))
 
 
 
@@ -1036,13 +1035,14 @@ The returned compile attributes are in the form:
                    (attributes-list (malinka--configoutput-process-words words))
                    (defines   (nth 0 attributes-list))
                    (includes  (nth 1 attributes-list))
-                   (arguments (nth 2 attributes-list)))
+                   (arguments (nth 2 attributes-list))
+                   (new-includes (malinka--includes-make-absolute includes project)))
               (malinka--project-add-file project
                                          file-name
                                          dir
                                          compiler-executable
                                          defines
-                                         includes
+                                         new-includes
                                          arguments)
               project)
             ;; else this line is not a compile command
@@ -1178,46 +1178,25 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
         )))
 
 ;;; --- Interface with flycheck if existing ---
-;;; TODO: update this soon
-;; (defun malinka-update-flycheck-cpp-defines (map)
-;; "If MAP's project is current, update the flycheck clang definitions."
-;;   (let ((name (malinka-project-map-get name map))
-;;          (defines (malinka-project-map-get cpp-defines map)))
-;;     (when (string= malinka--current-project-name name)
-;;       (setq flycheck-clang-definitions defines))))
+(eval-after-load 'flycheck
+  (progn
+    (defun malinka-flycheck-clang-interface()
+      "Configure flycheck clang's syntax checker according to what we know."
+      (with-current-buffer (current-buffer)
+        (let ((buffer (current-buffer)))
+          (when (malinka--buffer-is-c? buffer)
+            (let* ((filename (buffer-file-name buffer))
+                   (query (malinka--file-belongs-to-project filename)))
+              (when query
+                (let ((fileattr (nth 1 query)))
+                  (when (malinka--file-attributes-p fileattr)
+                    (let ((defines  (malinka--file-attributes-defines fileattr))
+                          (includes (malinka--file-attributes-includes fileattr)))
+                      (setq flycheck-clang-definitions defines)
+                      (setq flycheck-clang-include-path includes))))))))))
 
-;; (defun malinka-update-flycheck-include-dirs (map)
-;; "If MAP's project is current, update the flycheck clang include path."
-;;   (let ((name (malinka-project-map-get name map))
-;;          (includes (malinka-project-map-get cpp-defines map)))
-;;     (when (string= malinka--current-project-name name)
-;;       (setq flycheck-clang-include-path includes))))
-
-;; (eval-after-load 'flycheck
-;;   (progn
-;;     (defun malinka-flycheck-clang-interface()
-;;       "Configure flycheck clang's syntax checker according to what we know."
-;;       (with-current-buffer (current-buffer)
-;;         (let* ((project-root (malinka--project-detect-root))
-;;                (project-name (malinka--project-name-from-root project-root)))
-;;           (when (malinka--configure-project-p project-name)
-;;             (setq malinka--current-project-name project-name)
-;;             (let ((includes-res
-;;                    (malinka--process-relative-dirs
-;;                     (malinka--project-name-get include-dirs project-name)
-;;                     project-root))
-;;                   (cppflags-res (malinka--project-name-get cpp-defines project-name)))
-;;               (if includes-res
-;;                   (setq malinka-include-dirs includes-res)
-;;                 (setq malinka-include-dirs '()))
-;;               (if cppflags-res
-;;                   (setq malinka-macro-cppflags cppflags-res)
-;;                 (setq malinka-macro-cppflags '()))))
-;;           ;; whether we switched project or not assert modules are configured
-;;           (setq flycheck-clang-definitions malinka-macro-cppflags)
-;;           (setq flycheck-clang-include-path malinka-include-dirs))))
-
-;;     (add-hook 'flycheck-before-syntax-check-hook 'malinka-flycheck-clang-interface)))
+    (add-hook 'flycheck-before-syntax-check-hook
+              'malinka-flycheck-clang-interface)))
 
 (provide 'malinka)
 ;;; malinka.el ends here
