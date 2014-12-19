@@ -131,7 +131,7 @@ nil
   :safe #'malinka--string-list-p
   :package-version '(malinka . "0.3.0"))
 
-(defcustom malinka-mode-line "malinka"
+(defcustom malinka-mode-line " malinka"
   "The string to show in the mode line when malinka minor mode is active."
   :group 'malinka
   :package-version '(malinka . "0.3.0"))
@@ -160,28 +160,13 @@ nil
   :safe #'booleanp
   :package-version '(malinka . "0.3.0"))
 
-(defcustom malinka-idle-project-check-seconds 4
+(defcustom malinka-idle-project-check-seconds 5
   "The idle time in seconds to wait until we perform a project change check."
   :group 'malinka
   :type 'number)
 
 (defvar malinka--timer-idle-project-check nil
   "The timer created by `malinka-enable-idle-project-check'.")
-
-(defcustom malinka-enable-idle-project-check nil
-  "Enables idle timer for `malinka--timer-idle-project-check'."
-  :group 'malinka
-  :set (lambda (symbol value)
-         (set symbol value)
-         (when malinka--timer-idle-project-check
-           (cancel-timer malinka--timer-idle-project-check))
-         (setq malinka--timer-idle-project-check nil)
-         (when malinka-enable-idle-project-check
-           (setq malinka--timer-idle-project-check
-                 (run-with-idle-timer
-                  malinka-idle-project-check-seconds
-                  t
-                  'malinka--idle-project-check)))))
 
 ;;; --- Global project variables ---
 
@@ -225,6 +210,16 @@ nil
      (message (concat "Malinka-xdebug: " ,fmt) ,@args)))
 
 ;;; --- Timers ---
+(defun malinka-idle-project-check-timer-update (seconds)
+  "Set the value in SECONDS after which the idle project check will happen.
+
+If `seconds' is nil or 0 then idle project check is disabled."
+  (when malinka--timer-idle-project-check
+    (cancel-timer malinka--timer-idle-project-check))
+  (setq malinka--timer-idle-project-check
+        (and seconds (/= seconds 0)
+             (run-with-idle-timer seconds t 'malinka--idle-project-check))))
+
 (defun malinka--idle-project-check ()
   "Run an idle project check for the current malinka project.
 
@@ -1159,15 +1154,15 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
 
 ;;;###autoload
 (define-minor-mode malinka-mode
-  "TODO: doc"
+  "Enables all malinka functionality for the current buffer"
   :lighter malinka-mode-line
   :group 'malinka
   :require 'malinka
-  :global t
+  :global nil
   (cond (malinka-mode
-         (setq malinka-enable-idle-project-check t))
+         (malinka-idle-project-check-timer-update malinka-idle-project-check-seconds))
         (:else
-         (setq malinka-enable-idle-project-check nil))))
+         (malinka-idle-project-check-timer-update nil))))
 
 ;;; --- Interface with flycheck if existing ---
 (eval-after-load 'flycheck
