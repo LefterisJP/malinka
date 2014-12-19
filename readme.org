@@ -42,6 +42,8 @@ file using =(malinka-define-project)=.
 #+BEGIN_SRC emacs-lisp
 (require 'malinka)
 
+(add-hook 'c-mode-common-hook 'malinka-mode)
+
 (malinka-define-project
  :name "ethereum"
  :root-directory "/home/lefteris/ew/cpp-ethereum"
@@ -49,9 +51,13 @@ file using =(malinka-define-project)=.
  :configure-cmd "cmake .. -DCMAKE_BUILD_TYPE=Debug -DHEADLESS=1"
  :compile-cmd "make -j4"
  :test-cmd "./test/testeth")
-     #+END_SRC
+ #+END_SRC
 
-In the above example we can see a sample definition of a project. Let's look at the arguments one by one.
+In the above example we can see malinka's initialization and a sample definition of a project.
+You need to hook =malinka-mode= to c/c++ mode so that all malinka functionality can operate only
+on the loading of those type of buffers.
+
+Let's look now at the arguments of a project's definition one by one.
 
 ** name
 This is the name of the project. This is how malinka will refer to your project everywhere. Must be unique.
@@ -132,12 +138,11 @@ As a user you have ample customization choices when using malinka. These are:
 - *malinka-supported-header-types*:
   File extensions that malinka will treat as related header files.
 
-- *malinka-enable-idle-project-check*:
-  If set to non-nil, then malinka will run some project [[Idle Check][checks]] during the editor's
-  idle time.
-
 - *malinka-idle-project-check-seconds*:
-  The idle time in seconds to wait until we perform a project change check.
+  The idle time in seconds to wait until we perform a project idle [[Idle Check][check]]. Can be nil or 0 to disable idle project checks.
+
+- *malinka-mode-line*:
+  The string to show on the modeline when malinka minor mode is active
 
 - *malinka-print-info?*:
     If true malinka will be printing some info messages of the actions it takes.
