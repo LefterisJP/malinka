@@ -189,9 +189,6 @@ nil
 (defvar malinka--projects-map
   (make-hash-table :test 'equal)
   "Global hash map containing all projects known to malinka.")
-(defvar malinka-macro-cppflags '() "The current project's cpp flags.")
-(defvar malinka-include-dirs '()
-  "The current project's compiler include directories.")
 
 ; --- Helper Macros ---
 (defmacro malinka--project-name-get (attribute name)
@@ -660,7 +657,7 @@ Compatible means that it's of a big enough version in order to be able to genera
 			(if (>= patch-version 5) t nil))
 		   ((> minor-version 8) t)
 		   ((< minor-version 8) nil)))
-		 (t ;; major version being 1 means not supported
+		 (:else ;; major version being 1 means not supported
 		  nil))))))
 
 (defun malinka--cmake-create-compiledb (project-map)
@@ -752,19 +749,19 @@ Returns the output of the command as a string or nil in case of error"
 
 ;;; --- Functions related to creating the compilation database ---
 
-(defun malinka-json-format-escapes (str)
+(defun malinka--json-format-escapes (str)
   "Unescapes/escape special characters before signing off a json encoded STR."
   (s-replace "\\\/" "/" str))
 
 (defun malinka--project-command-form-defines (cpp-defines)
   "Form the CPP-DEFINES part of the build command."
   (s-join " "
-          (--map (s-prepend "-D" (malinka-json-format-escapes it)) cpp-defines)))
+          (--map (s-prepend "-D" (malinka--json-format-escapes it)) cpp-defines)))
 
 (defun malinka--project-command-form-includes (include-dirs)
   "Form the INCLUDE-DIRS part of the build command."
   (s-join " "
-          (--map (s-prepend "-I" (malinka-json-format-escapes it)) include-dirs)))
+          (--map (s-prepend "-I" (malinka--json-format-escapes it)) include-dirs)))
 
 (defun malinka--project-form-command (project-map file-attr)
 "Form the compile command for a PROJECT-MAP's FILE-ATTR."
@@ -803,7 +800,7 @@ Returns the output of the command as a string or nil in case of error"
   ; have to build it manually
   (let* ((json-list (malinka--project-create-json-list project)))
     (format "[\n%s\n]" (s-join
-                        ",\n" (-map 'malinka-json-format-escapes json-list)))))
+                        ",\n" (-map 'malinka--json-format-escapes json-list)))))
 
 (defun malinka--compiledb-write (str name)
   "Create and write STR to db file NAME."
@@ -834,7 +831,7 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
       (malinka--select-project rootdir))
      ((f-exists? buildcdb)
       (malinka--select-project builddir))
-     (t
+     (:else
       (malinka--project-map-update-compiledb project)))))
 
 (defun malinka--project-map-update-compiledb (project-map)
@@ -859,7 +856,7 @@ parse the output and create the database manually."
       (malinka--select-project rootdir))
      ((f-exists? buildcdb)
       (malinka--select-project builddir))
-     (t
+     (:else
       (malinka--warning "Could not select a compilation database for \"%s\"" (malinka--project-name project))))))
 
 (defun malinka--select-project (directory)
@@ -939,8 +936,7 @@ Returns the modified list if modified and the same list if not."
 (defun malinka--buildcmd-ignore-argument-p (arg)
   "Return true if ARG of the build command should be ignored."
   (or
-   ;; Ugly fix:since the compiled file has already been extracted ignore it here
-   ;; TODO: Rework this whole thing very soon.
+   (malinka--word-is-compiler? arg)
    (malinka--cfile? arg)
    ;; ignore object files
    (s-ends-with? ".o" arg)
@@ -1169,13 +1165,9 @@ exist then it's nice to provide the ROOT-DIR of the project to configure"
   :require 'malinka
   :global t
   (cond (malinka-mode
-         ;; (advice-add 'switch-to-buffer :before  #'malinka--switch-to-buffer)
-         ;; (advice-add 'select-window :before  #'malinka--select-window))
-         )
-        (t
-         ;; (advice-remove 'switch-to-buffer #'malinka--switch-to-buffer)
-         ;; (advice-remove 'select-window #'malinka--select-window))
-        )))
+         (setq malinka-enable-idle-project-check t))
+        (:else
+         (setq malinka-enable-idle-project-check nil))))
 
 ;;; --- Interface with flycheck if existing ---
 (eval-after-load 'flycheck
