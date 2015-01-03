@@ -6,7 +6,7 @@
 ;; Author: Lefteris Karapetsas <lefteris@refu.co>
 ;; URL: https://github.com/LefterisJP/malinka
 ;; Keywords: c c++ project-management
-;; Version: 0.3.1
+;; Version: 0.3.2
 ;; Package-Requires: ((s "1.9.0") (dash "2.4.0") (f "0.11.0") (cl-lib "0.3") (rtags "0.0") (projectile "0.11.0"))
 
 ;; This file is NOT part of GNU Emacs.
@@ -675,10 +675,12 @@ Compatible means that it's of a big enough version in order to be able to genera
   "Handle all events from the project cmake command PROCESS.
 EVENT is ignored."
   (when (memq (process-status process) '(signal exit))
-    (let* ((project-map  (process-get process 'malinka-project-map))
-           (project-name (malinka--project-name project-map))
-           (build-dir     (malinka--project-build-directory project-map))
-           (buffer       (process-buffer process))
+    (let* ((project-map       (process-get process 'malinka-project-map))
+           (project-name      (malinka--project-name project-map))
+           (build-dir         (malinka--project-build-directory project-map))
+           (root-dir          (malinka--project-root-directory project-map))
+           (buffer            (process-buffer process))
+           (compile-database  (f-join build-dir "compile_commands.json"))
            (output       (with-current-buffer buffer
                            (save-excursion
                              (goto-char (point-min))
@@ -686,6 +688,9 @@ EVENT is ignored."
                                         (buffer-string))))))
       (malinka--info "Cmake command for \"%s\" finished. Proceeding to process the output" project-name)
       (kill-buffer buffer)
+      ;; for some reason irony seems to stop autodetecting the compile database
+      ;; in cmake build dir so let' copy it to the root directory too. Not very elegant solution
+      (f-copy compile-database (f-join root-dir "compile_commands.json"))
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
