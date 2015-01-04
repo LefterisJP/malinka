@@ -561,14 +561,14 @@ ARGUMENTS are all the other compiler arguments for the file."
   (let ((files-list (malinka--project-files-list project)))
     ;; TODO Search if file is already in project and issue a warning
     (setf (malinka--project-files-list project)
-	  (add-to-list 'files-list
-		       (make-malinka--file-attributes
-			:name name
-			:directory directory
-			:executable executable
-			:includes includes
-			:defines defines
-			:arguments arguments)))))
+          (add-to-list 'files-list
+                       (make-malinka--file-attributes
+                        :name name
+                        :directory directory
+                        :executable executable
+                        :includes includes
+                        :defines defines
+                        :arguments arguments)))))
 
 
 (defun malinka--list-add-list-or-elem (list elem)
@@ -764,33 +764,36 @@ Returns the output of the command as a string or nil in case of error"
           (--map (s-prepend "-I" (malinka--json-format-escapes it)) include-dirs)))
 
 (defun malinka--project-form-command (project-map file-attr)
-"Form the compile command for a PROJECT-MAP's FILE-ATTR."
+  "Form the compile command for a PROJECT-MAP's FILE-ATTR."
 
-  (let ((defines (malinka--file-attributes-defines file-attr))
-	(includes (malinka--file-attributes-includes file-attr))
-	(arguments (malinka--file-attributes-arguments file-attr))
-        (executable (malinka--file-attributes-executable file-attr))
-	(filename   (malinka--file-attributes-name file-attr)))
-    (s-concat executable
-              " "
-              (s-join " " arguments)
-              " "
-              (malinka--project-command-form-defines defines)
-              " "
-              (malinka--project-command-form-includes includes)
-              " -c -o "
-              (s-append ".o " (f-no-ext filename))
-              filename)))
+  (let* ((defines       (malinka--file-attributes-defines file-attr))
+         (includes      (malinka--file-attributes-includes file-attr))
+         (arguments     (malinka--file-attributes-arguments file-attr))
+         (executable    (malinka--file-attributes-executable file-attr))
+         (filename      (malinka--file-attributes-name file-attr))
+         (abs-filename  (f-join (malinka--file-attributes-directory file-attr) filename)))
+         (s-concat executable
+                   " "
+                   (s-join " " arguments)
+                   " "
+                   (malinka--project-command-form-defines defines)
+                   " "
+                   (malinka--project-command-form-includes includes)
+                   " -c -o "
+                   (s-append ".o " (f-no-ext abs-filename))
+                   abs-filename)))
 
 (defun malinka--project-create-json-list (project)
   "Create the json association list for this PROJECT."
   (-map
    (lambda (item)
-     (let ((command-string (malinka--project-form-command project item)))
+     (let* ((command-string (malinka--project-form-command project item))
+            (filename       (malinka--file-attributes-name item))
+            (abs-filename   (f-join (malinka--file-attributes-directory item) filename)))
        (json-encode-alist
 	`((directory . ,(malinka--project-build-directory project))
 	  (command . ,command-string)
-	  (file . ,(malinka--file-attributes-name item))))))
+	  (file . ,abs-filename)))))
    (malinka--project-files-list project)))
 
 (defun malinka--project-json-representation (project)
