@@ -718,11 +718,11 @@ Returns the output of the command as a string or nil in case of error"
 (defun malinka--rtags-assert-rdm-runs ()
   "Assert that the rtags daemon is running."
   ; if the process has been messed with by outside sources clean it up
-  (let ((status (if rtags-process (process-status rtags-process) nil)))
+  (let ((status (if rtags-rdm-process (process-status rtags-rdm-process) nil)))
     (when (or (not status) (memq status '(exit signal closed failed)))
-      (when rtags-process
-        (delete-process rtags-process))
-      (setq rtags-process nil)
+      (when rtags-rdm-process
+        (delete-process rtags-rdm-process))
+      (setq rtags-rdm-process nil)
       (when (get-buffer "*rdm*")
         (kill-buffer "*rdm*"))))
   (if (rtags-start-process-maybe)
