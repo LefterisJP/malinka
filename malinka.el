@@ -738,7 +738,7 @@ Returns the output of the command as a string or nil in case of error"
 (defun malinka--rtags-project-loaded? (project)
   "Check if rtags has loaded PROJECT."
   (let* ((output (malinka--rtags-invoke-with "-w"))
-         (loadedlist (s-match "\\(.*\\) (loaded) <=" output))
+         (loadedlist (s-match "\\(.*\\) <=" output))
          (dir (when loadedlist (nth 1 loadedlist))))
     (when dir
       (f-equal? dir (malinka--project-root-directory project)))))
