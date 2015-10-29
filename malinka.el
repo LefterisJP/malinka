@@ -586,7 +586,7 @@ ELEM can be either a single element or another list"
       (hash-table-keys malinka--projects-map)
     ;; else use maphash
     (let ((projects ()))
-      (maphash (lambda (key val) (cons key projects)) malinka--projects-map)
+      (maphash (lambda (key val) (push key projects)) malinka--projects-map)
       (sort projects #'string<))))
 
 (defun malinka--project-detect-root ()
