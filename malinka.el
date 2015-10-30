@@ -194,6 +194,10 @@ nil
   `(when malinka-print-info?
      (message (concat "Malinka-info: " ,fmt) ,@args)))
 
+(defmacro malinka--warning-always (fmt &rest args)
+  "This macro will print messages by passing FMT and ARGS to message."
+     `(message (concat "Malinka-warning: " ,fmt) ,@args))
+
 (defmacro malinka--warning (fmt &rest args)
   "Depending on the value of `malinka-print-warning?' this macro will print messages by passing FMT and ARGS to message."
   `(when malinka-print-warning?
@@ -516,12 +520,14 @@ A user can also provide a `test-cmd' which will be forwarded to projectile
 as the project's test command. Default keybinding: C-c p P
 
 The project is added to the global `malinka--projects-map'"
-  (malinka--assert-string name "project name" t)
-  (malinka--assert-directory root-directory "project root directory" t)
-  (malinka--assert-directory build-directory "project build directory" t)
-  (malinka--assert-string configure-cmd "configure command" t)
+  (condition-case-unless-debug nil
+	  (progn
+		(malinka--assert-string name "project name" t)
+		(malinka--assert-directory root-directory "project root directory" t)
+		(malinka--assert-directory build-directory "project build directory" t)
+		(malinka--assert-string configure-cmd "configure command" t)
 
-  (let* ((new-root-directory (f-slash root-directory))
+		(let* ((new-root-directory (f-slash root-directory))
 	 (new-build-directory (f-slash build-directory))
 	 (new-compile-cmd (malinka--process-compile-cmd
 			   compile-cmd
@@ -543,7 +549,8 @@ The project is added to the global `malinka--projects-map'"
 		   :compile-cmd new-compile-cmd
 		   :test-cmd new-test-cmd
 		   :files-list '())
-	     malinka--projects-map)))
+			 malinka--projects-map)))
+	(error (malinka--warning-always "Could not setup a project due to an error at (malinka-define-project). Skipping that project."))))
 
 (defun malinka--project-add-file (project
                                   name directory
