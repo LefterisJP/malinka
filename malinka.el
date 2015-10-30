@@ -432,6 +432,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
   configure-cmd
   compile-cmd
   test-cmd
+  run-cmd
   files-list)
 
 (cl-defstruct malinka--file-attributes
@@ -466,8 +467,8 @@ If USER is t then it's a user error, otherwise it's an internal error."
 
     (when (require 'projectile nil 'noerror)
       (puthash root-directory
-	       new-compile-cmd
-	       projectile-compilation-cmd-map))
+               new-compile-cmd
+               projectile-compilation-cmd-map))
     new-compile-cmd))
 
 (defun malinka--process-test-cmd (test-cmd
@@ -478,7 +479,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
   (unless root-directory
     (progn
       (malinka--error
-       "Provided compile-cmd \"%s\" for a project without a root directory"
+       "Provided test-cmd \"%s\" for a project without a root directory"
        test-cmd)
       nil))
 
@@ -489,16 +490,35 @@ If USER is t then it's a user error, otherwise it's an internal error."
            test-cmd)))
     (when (require 'projectile nil 'noerror)
       (puthash root-directory
-	       new-test-cmd
-	       projectile-test-cmd-map))
+               new-test-cmd
+               projectile-test-cmd-map))
     new-test-cmd))
 
+(defun malinka--process-run-cmd (run-cmd root-directory)
+  "Process RUN-CMD for a project at ROOT-DIRECTORY."
+  (unless run-cmd nil)
+  (unless root-directory
+    (progn
+      (malinka--error
+       "Provided run-cmd \"%s\" for a project without a root directory"
+       run-cmd)
+      nil))
+
+  (let ((new-run-cmd
+         (format "cd %s && %s" root-directory run-cmd)))
+    (when (require 'projectile nil 'noerror)
+      (puthash root-directory
+               new-run-cmd
+               projectile-run-cmd-map))
+    new-run-cmd))
+
 (defun* malinka-define-project (&key (name nil)
-				     (root-directory nil)
-				     (build-directory nil)
-				     (configure-cmd nil)
-				     (compile-cmd nil)
-				     (test-cmd nil))
+                                     (root-directory nil)
+                                     (build-directory nil)
+                                     (configure-cmd nil)
+                                     (compile-cmd nil)
+                                     (test-cmd nil)
+                                     (run-cmd nil))
   "Define a c/c++ project named NAME.
 
 Provide the ROOT-DIRECTORY of the project.
@@ -520,38 +540,47 @@ as the project's compile command. Default keybinding: C-c p c
 A user can also provide a `test-cmd' which will be forwarded to projectile
 as the project's test command. Default keybinding: C-c p P
 
+A project can also have a `run-cmd' which will be forwarded to projectile as the
+project's run command. Default keybinding: C-c p u.
+
 The project is added to the global `malinka--projects-map'"
   (condition-case-unless-debug nil
-	  (progn
-		(malinka--assert-string name "project name" t)
-		(malinka--assert-directory root-directory "project root directory" t)
-		(malinka--assert-directory build-directory "project build directory" t)
-		(malinka--assert-string configure-cmd "configure command" t)
+      (progn
+        (malinka--assert-string name "project name" t)
+        (malinka--assert-directory root-directory "project root directory" t)
+        (malinka--assert-directory build-directory "project build directory" t)
+        (malinka--assert-string configure-cmd "configure command" t)
+        (malinka--assert-string test-cmd "test command" t)
+        (malinka--assert-string run-cmd "run command" t)
 
-		(let* ((new-root-directory (f-slash root-directory))
-	 (new-build-directory (f-slash build-directory))
-	 (new-compile-cmd (malinka--process-compile-cmd
-			   compile-cmd
-			   new-root-directory
-			   new-build-directory))
-	 (new-test-cmd (malinka--process-test-cmd
-			test-cmd
-			new-root-directory
-			new-build-directory)))
+        (let* ((new-root-directory (f-slash root-directory))
+               (new-build-directory (f-slash build-directory))
+               (new-run-cmd (malinka--process-run-cmd run-cmd new-root-directory))
+               (new-compile-cmd (malinka--process-compile-cmd
+                                 compile-cmd
+                                 new-root-directory
+                                 new-build-directory))
+               (new-test-cmd (malinka--process-test-cmd
+                              test-cmd
+                              new-root-directory
+                              new-build-directory)))
 
-    (when (gethash name malinka--projects-map)
-      (malinka--warning "Redefining project map for \"%s\"" name))
+          (when (gethash name malinka--projects-map)
+            (malinka--warning "Redefining project map for \"%s\"" name))
 
-    (puthash name (make-malinka--project
-		   :name name
-		   :root-directory new-root-directory
-		   :build-directory new-build-directory
-		   :configure-cmd configure-cmd
-		   :compile-cmd new-compile-cmd
-		   :test-cmd new-test-cmd
-		   :files-list '())
-			 malinka--projects-map)))
-	(error (malinka--warning-always "Could not setup a project due to an error at (malinka-define-project). Skipping that project."))))
+          (puthash name (make-malinka--project
+                         :name name
+                         :root-directory new-root-directory
+                         :build-directory new-build-directory
+                         :configure-cmd configure-cmd
+                         :compile-cmd new-compile-cmd
+                         :test-cmd new-test-cmd
+                         :run-cmd run-cmd
+                         :files-list '())
+                   malinka--projects-map)))
+    (error
+     (malinka--warning-always
+      "Could not setup a project due to an error at (malinka-define-project). Skipping that project."))))
 
 (defun malinka--project-add-file (project
                                   name directory
