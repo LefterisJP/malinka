@@ -1,7 +1,7 @@
 ;;; malinka.el --- A C/C++ project configuration package for Emacs
 ;;
 
-;; Copyright © 2014 Lefteris Karapetsas <lefteris@refu.co>
+;; Copyright © 2014-2015 Lefteris Karapetsas <lefteris@refu.co>
 ;;
 ;; Author: Lefteris Karapetsas <lefteris@refu.co>
 ;; URL: https://github.com/LefterisJP/malinka
@@ -108,6 +108,7 @@ nil
 					 ,(malinka--compiler-create "cc")
 					 ,(malinka--compiler-create "g++")
 					 ,(malinka--compiler-create "clang")
+					 ,(malinka--compiler-create "clang++")
 					 ,(malinka--compiler-create "c++"))
 "A list of compiler executable names that are recognized and supported by malinka."
   :group 'malinka
