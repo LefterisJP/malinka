@@ -47,9 +47,7 @@
 
 ;;; Code:
 
-(eval-when-compile
-(require 'cl))
-
+(require 'cl-lib)
 (require 'projectile)
 (require 's)
 (require 'dash)
