@@ -451,66 +451,66 @@ If USER is t then it's a user error, otherwise it's an internal error."
                                      root-directory
                                      build-directory)
   "Process COMPILE-CMD for a project at ROOT-DIRECTORY issued inside BUILD-DIRECTORY."
-  (unless compile-cmd nil)
-  (unless root-directory
-    (progn
-      (malinka--error
-       "Provided compile-cmd \"%s\" for a project without a root directory"
-       compile-cmd)
-      nil))
+  (when compile-cmd
+    (unless root-directory
+      (progn
+	(malinka--error
+	 "Provided compile-cmd \"%s\" for a project without a root directory"
+	 compile-cmd)
+	nil))
+    (malinka--assert-string compile-cmd "compile command" t)
+    (let ((new-compile-cmd
+	   (if build-directory
+	       (format "cd %s && %s" build-directory compile-cmd)
+	     ;;else
+	     compile-cmd)))
 
-  (let ((new-compile-cmd
-         (if build-directory
-             (format "cd %s && %s" build-directory compile-cmd)
-           ;;else
-           compile-cmd)))
-
-    (when (require 'projectile nil 'noerror)
-      (puthash root-directory
-               new-compile-cmd
-               projectile-compilation-cmd-map))
-    new-compile-cmd))
+      (when (require 'projectile nil 'noerror)
+	(puthash root-directory
+		 new-compile-cmd
+		 projectile-compilation-cmd-map))
+      new-compile-cmd)))
 
 (defun malinka--process-test-cmd (test-cmd
                                   root-directory
                                   build-directory)
   "Process TEST-CMD for a project at ROOT-DIRECTORY issued inside BUILD-DIRECTORY."
-  (unless test-cmd nil)
-  (unless root-directory
-    (progn
-      (malinka--error
-       "Provided test-cmd \"%s\" for a project without a root directory"
-       test-cmd)
-      nil))
-
-  (let ((new-test-cmd
-         (if build-directory
-             (format "cd %s && %s" build-directory test-cmd)
-           ;;else
-           test-cmd)))
-    (when (require 'projectile nil 'noerror)
-      (puthash root-directory
-               new-test-cmd
-               projectile-test-cmd-map))
-    new-test-cmd))
+  (when test-cmd
+    (unless root-directory
+      (progn
+	(malinka--error
+	 "Provided test-cmd \"%s\" for a project without a root directory"
+	 test-cmd)
+	nil))
+    (malinka--assert-string test-cmd "test command" t)
+    (let ((new-test-cmd
+	   (if build-directory
+	       (format "cd %s && %s" build-directory test-cmd)
+	     ;;else
+	     test-cmd)))
+      (when (require 'projectile nil 'noerror)
+	(puthash root-directory
+		 new-test-cmd
+		 projectile-test-cmd-map))
+      new-test-cmd)))
 
 (defun malinka--process-run-cmd (run-cmd root-directory)
   "Process RUN-CMD for a project at ROOT-DIRECTORY."
-  (unless run-cmd nil)
-  (unless root-directory
-    (progn
-      (malinka--error
-       "Provided run-cmd \"%s\" for a project without a root directory"
-       run-cmd)
-      nil))
-
-  (let ((new-run-cmd
-         (format "cd %s && %s" root-directory run-cmd)))
-    (when (require 'projectile nil 'noerror)
-      (puthash root-directory
-               new-run-cmd
-               projectile-run-cmd-map))
-    new-run-cmd))
+  (when run-cmd
+    (unless root-directory
+      (progn
+	(malinka--error
+	 "Provided run-cmd \"%s\" for a project without a root directory"
+	 run-cmd)
+	nil))
+    (malinka--assert-string run-cmd "run command" t)
+    (let ((new-run-cmd
+	   (format "cd %s && %s" root-directory run-cmd)))
+      (when (require 'projectile nil 'noerror)
+	(puthash root-directory
+		 new-run-cmd
+		 projectile-run-cmd-map))
+      new-run-cmd)))
 
 (defun* malinka-define-project (&key (name nil)
                                      (root-directory nil)
@@ -549,9 +549,7 @@ The project is added to the global `malinka--projects-map'"
         (malinka--assert-string name "project name" t)
         (malinka--assert-directory root-directory "project root directory" t)
         (malinka--assert-directory build-directory "project build directory" t)
-        (malinka--assert-string configure-cmd "configure command" t)
-        (malinka--assert-string test-cmd "test command" t)
-        (malinka--assert-string run-cmd "run command" t)
+        (when configure-cmd (malinka--assert-string configure-cmd "configure command" t))
 
         (let* ((new-root-directory (f-slash root-directory))
                (new-build-directory (f-slash build-directory))
