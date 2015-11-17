@@ -533,7 +533,7 @@ which will allow malinka to parse the compilation output and populate project da
 Most of the times, the `configure-cmd' will be the same as the compile command
 only with a dry run option appended. Noteable exception is:
   cmake > 2.85
-  ninja (?version)
+  ninja ( TODO which version is needed?)
 where all you need to do is provide the usual build configure step.
 
 The `compile-db-cmd' specifies how to create compile_commands.json exactly. If
@@ -669,10 +669,15 @@ No need to reinvent the wheel."
 
 (defun malinka--have-bear? ()
   "Detect if bear is installed on system."
-  (let* ((path (s-split ":" (getenv "PATH")))
-          (test-lt (-map (lambda (x) (file-executable-p (f-join x "bear")))
-                        path)))
-       (-contains? test-lt t)))
+  (let ((path (s-split ":" (getenv "PATH"))))
+    (malinka--have-bear?-help path)))
+
+(defun malinka--have-bear?-help (path)
+  "Detect if bear is in path on system."
+  (if path
+      (if (file-executable-p (f-join (car path) "bear")) t
+        (malinka--have-bear?-help (cdr path)))
+    nil))
 
 (defun malinka--project-compatible-cmake? (project-map)
   "Detect if the malinka PROJECT-MAP contains a cmake build command and if it is of a compatible version.
@@ -727,8 +732,6 @@ Current support PROJECT-TYPE are: compile-db-cmd, cmake, ninja, bear."
            ;; TODO check whether Ninja's compile command correct.
            (format "cd %s && %s compdb" build-dir configure-cmd))
           ((s-equals? project-type "bear")
-           ;; TODO we should handle the case when the project has been built and
-           ;; bear will not produce any out put.
            (format "cd %s && bear %s" build-dir configure-cmd))
           (t (malinka--error "Error: %s is not supported. Supported types: compile-db-cmd, cmake, ninja, bear",
                              project-type)))))
