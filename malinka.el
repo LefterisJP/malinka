@@ -533,7 +533,6 @@ which will allow malinka to parse the compilation output and populate project da
 Most of the times, the `configure-cmd' will be the same as the compile command
 only with a dry run option appended. Noteable exception is:
   cmake > 2.85
-  ninja ( TODO which version is needed?)
 where all you need to do is provide the usual build configure step.
 
 The `compile-db-cmd' specifies how to create compile_commands.json exactly. If
@@ -713,14 +712,10 @@ Compatible means that it's of a big enough version in order to be able to genera
   "Detect if the malinka PROJECT-MAP contains none empty compile-db-cmd."
   (not (s-blank? (malinka--project-compile-db-cmd project-map))))
 
-(defun malinka--project-ninja? (project-map)
-  "Detect if the malinka PROJECT-MAP contains a ninja build command."
-  (malinka--build-cmd-is-type? (malinka--project-configure-cmd project-map) "ninja"))
-
 (defun malinka--build-cmd-for-compiledb (project-map project-type)
   "Generate correct compile-db build cmd for different project type.
 
-Current support PROJECT-TYPE are: compile-db-cmd, cmake, ninja, bear."
+Current support PROJECT-TYPE are: compile-db-cmd, cmake, bear."
   (let* ((build-dir (malinka--project-build-directory project-map))
          (compile-db-cmd (malinka--project-compile-db-cmd project-map))
          (configure-cmd (malinka--project-configure-cmd project-map)))
@@ -728,12 +723,9 @@ Current support PROJECT-TYPE are: compile-db-cmd, cmake, ninja, bear."
            (format "cd %s && %s" build-dir compile-db-cmd))
           ((s-equals? project-type "cmake")
            (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir configure-cmd))
-          ((s-equals? project-type "ninja")
-           ;; TODO check whether Ninja's compile command correct.
-           (format "cd %s && %s compdb" build-dir configure-cmd))
           ((s-equals? project-type "bear")
            (format "cd %s && bear %s" build-dir configure-cmd))
-          (t (malinka--error "Error: %s is not supported. Supported types: compile-db-cmd, cmake, ninja, bear",
+          (t (malinka--error "Error: %s is not supported. Supported types: compile-db-cmd, cmake, bear",
                              project-type)))))
 
 (defun malinka--create-compiledb (project-map project-type)
@@ -793,18 +785,6 @@ EVENT is ignored."
       ;; such like: whether the compile_commands.json is empty, like just
       ;; contains "[ ]". Because bear may failed, which will generate a
       ;; compile_commands.json file with only "[ ]".
-      (with-temp-buffer
-        (malinka--select-project build-dir)))))
-
-(defun malinka--handle-ninja-finish (process event)
-  "Handle all events from the project ninja command PROCESS.
-EVENT is ignored."
-  (when (memq (process-status process) '(signal exit))
-    (let* ((project-map       (process-get process 'malinka-project-map))
-           (project-name      (malinka--project-name project-map))
-           (build-dir         (malinka--project-build-directory project-map)))
-      (malinka--info "Ninja command for \"%s\" finished. Proceeding to process the output" project-name)
-      ;; TODO Do we need to handle irony issue as in malinka--handle-cmake-finish?
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
@@ -969,8 +949,7 @@ The control flow is:
 1. If compile-db-cmd is given, use it to create compile_commands.json.
 2. If it's cmake and the cmake version is compatible then create the
 compilation database with cmake.
-3. If it's ninja use the ninja way to create the database.
-4. If the user's system has bear, prepend that to the compilation command to
+3. If the user's system has bear, prepend that to the compilation command to
 create the database
 4. Else execute the build command, parse the output and create the database
 manually."
@@ -978,8 +957,6 @@ manually."
          (malinka--create-compiledb project-map "compile-db-cmd"))
         ((malinka--project-compatible-cmake? project-map)
          (malinka--create-compiledb project-map "cmake"))
-        ((malinka--project-ninja? project-map)
-         (malinka--create-compiledb project-map "ninja"))
         (malinka--have-bear?
          (malinka--create-compiledb project-map "bear"))
         ;; else execute the compile command and parse the output
