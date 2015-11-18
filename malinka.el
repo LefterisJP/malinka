@@ -241,6 +241,8 @@ Run each time `malinka-idle-project-check-seconds' have passed
              ;; nothing is being configured right now
              ;; and it's not a cmake 2.8.5 project or bear project then configure it
              ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+
+             ;; TODO: Does added bear and compile-db-cmd type need some processing here?
              ((and (eq fileattr 'not-configured)
                    (not (malinka--project-compatible-cmake? project))
                    (not (malinka--rtags-is-indexing?))
@@ -724,7 +726,7 @@ Current support PROJECT-TYPE are: compile-db-cmd, cmake, bear."
           ((s-equals? project-type "cmake")
            (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir configure-cmd))
           ((s-equals? project-type "bear")
-           (format "cd %s && bear %s" build-dir configure-cmd))
+           (format "cd %s && bear -a %s" build-dir configure-cmd))
           (t (malinka--error "Error: %s is not supported. Supported types: compile-db-cmd, cmake, bear",
                              project-type)))))
 
@@ -957,7 +959,7 @@ manually."
          (malinka--create-compiledb project-map "compile-db-cmd"))
         ((malinka--project-compatible-cmake? project-map)
          (malinka--create-compiledb project-map "cmake"))
-        (malinka--have-bear?
+        ((malinka--have-bear?)
          (malinka--create-compiledb project-map "bear"))
         ;; else execute the compile command and parse the output
         (t (malinka--project-execute-compile-cmd project-map))))
