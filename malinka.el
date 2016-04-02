@@ -239,8 +239,10 @@ Run each time `malinka-idle-project-check-seconds' have passed
 	    (cond
              ;; if file check results show that the project is not configured
              ;; nothing is being configured right now
-             ;; and it's not a cmake 2.8.5 project then configure it
+             ;; and it's not a cmake 2.8.5 project or bear project then configure it
              ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+
+             ;; TODO: Does added bear and compile-db-cmd type need some processing here?
              ((and (eq fileattr 'not-configured)
                    (not (malinka--project-compatible-cmake? project))
                    (not (malinka--rtags-is-indexing?))
@@ -427,6 +429,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
   name
   root-directory
   build-directory
+  compile-db-cmd
   configure-cmd
   compile-cmd
   test-cmd
@@ -515,6 +518,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
                                      (build-directory nil)
                                      (configure-cmd nil)
                                      (compile-cmd nil)
+                                     (compile-db-cmd nil)
                                      (test-cmd nil)
                                      (run-cmd nil))
   "Define a c/c++ project named NAME.
@@ -529,8 +533,13 @@ A user has to provide a `compile-cmd' which will specify how the project in ques
 is going to be compiled. In addition the user should provide a `configure-cmd'
 which will allow malinka to parse the compilation output and populate project data.
 Most of the times, the `configure-cmd' will be the same as the compile command
-only with a dry run option appended. Noteable exception is cmake > 2.85 where
-all you need to do is provide the usual cmake configure step.
+only with a dry run option appended. Noteable exception is:
+  cmake > 2.85
+where all you need to do is provide the usual build configure step.
+
+The `compile-db-cmd' specifies how to create compile_commands.json exactly. If
+it is provided, malinka will not parse `configure-cmd' output to get
+compile_commands.json.
 
 The `compile-cmd' will be forwarded to projectile
 as the project's compile command. Default keybinding: C-c p c
@@ -548,6 +557,7 @@ The project is added to the global `malinka--projects-map'"
         (malinka--assert-directory root-directory "project root directory" t)
         (malinka--assert-directory build-directory "project build directory" t)
         (when configure-cmd (malinka--assert-string configure-cmd "configure command" t))
+        (when compile-db-cmd (malinka--assert-string compile-db-cmd "compile-db-cmd command" t))
 
         (let* ((new-root-directory (f-slash root-directory))
                (new-build-directory (f-slash build-directory))
@@ -569,6 +579,7 @@ The project is added to the global `malinka--projects-map'"
                          :root-directory new-root-directory
                          :build-directory new-build-directory
                          :configure-cmd configure-cmd
+                         :compile-db-cmd compile-db-cmd
                          :compile-cmd new-compile-cmd
                          :test-cmd new-test-cmd
                          :run-cmd run-cmd
@@ -646,17 +657,28 @@ No need to reinvent the wheel."
     (file-name-nondirectory (directory-file-name root-dir))))
 
 
-;;; --- malinka cmake integration ---
-(defun malinka--build-cmd-cmake? (build-cmd)
-  "Detect if a BUILD-CMD string contains cmake."
+(defun malinka--build-cmd-is-type? (build-cmd build-type)
+  "Defun if a BUILD-CMD string contains BUILD-TYPE."
   (let* ((words (s-split " " build-cmd))
          (first (car words)))
-    ;; just check if the first word is cmake
-    (when (s-equals? first "cmake") t)))
+    ;; just check if the first word is BUILD-TYPE
+    (when (s-equals? first build-type) t)))
 
 (defun malinka--project-cmake? (project-map)
   "Detect if the malinka PROJECT-MAP contains a cmake build command."
-  (malinka--build-cmd-cmake? (malinka--project-configure-cmd project-map)))
+  (malinka--build-cmd-is-type? (malinka--project-configure-cmd project-map) "cmake"))
+
+(defun malinka--have-bear? ()
+  "Detect if bear is installed on the system."
+  (let ((path (s-split ":" (getenv "PATH"))))
+    (malinka--have-bear-impl path)))
+
+(defun malinka--have-bear-impl (path)
+  "Detect if bear is in path on the system."
+  (if path
+      (if (file-executable-p (f-join (car path) "bear")) t
+        (malinka--have-bear?-help (cdr path)))
+    nil))
 
 (defun malinka--project-compatible-cmake? (project-map)
   "Detect if the malinka PROJECT-MAP contains a cmake build command and if it is of a compatible version.
@@ -688,20 +710,41 @@ Compatible means that it's of a big enough version in order to be able to genera
 		 (:else ;; major version being 1 means not supported
 		  nil))))))
 
-(defun malinka--cmake-create-compiledb (project-map)
-  "Create a compilation database for a PROJECT-MAP using CMAKE."
-  (let* ((configure-cmd (malinka--project-configure-cmd project-map))
-         (build-dir (malinka--project-build-directory project-map))
-         (nbuild-cmd (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir configure-cmd))
+(defun malinka--project-contains-compile-db-cmd? (project-map)
+  "Detect if the malinka PROJECT-MAP contains non-empty compile-db-cmd."
+  (not (s-blank? (malinka--project-compile-db-cmd project-map))))
+
+(defun malinka--build-cmd-for-compiledb (project-map project-type)
+  "Generate correct compile-db build cmd for different project type.
+
+Currenttly supported PROJECT-TYPE are: compile-db-cmd, cmake, bear."
+  (let* ((build-dir (malinka--project-build-directory project-map))
+         (compile-db-cmd (malinka--project-compile-db-cmd project-map))
+         (configure-cmd (malinka--project-configure-cmd project-map)))
+    (cond ((s-equals? project-type "compile-db-cmd")
+           (format "cd %s && %s" build-dir compile-db-cmd))
+          ((s-equals? project-type "cmake")
+           (format "cd %s && %s -DCMAKE_EXPORT_COMPILE_COMMANDS=ON" build-dir configure-cmd))
+          ((s-equals? project-type "bear")
+           (format "cd %s && bear -a %s" build-dir configure-cmd))
+          (t (malinka--error "Error: %s is not supported. Supported types: compile-db-cmd, cmake, bear",
+                             project-type)))))
+
+(defun malinka--create-compiledb (project-map project-type)
+  "Create a compilation database for a PROJECT-MAP with provided PROJECT-TYPE."
+  (let* ((compile-db-cmd (malinka--project-compile-db-cmd project-map))
+         (configure-cmd (malinka--project-configure-cmd project-map))
+         (nbuild-cmd (malinka--build-cmd-for-compiledb project-map project-type))
          (project-name (malinka--project-name project-map))
-         (process-name  (format "malinka-cmake-command-%s" project-name)))
-    (malinka--info "Executing cmake command: \"%s\"" nbuild-cmd)
-    (malinka--info "Waiting for cmake to finish")
+         (process-name  (format "malinka-%s-command-%s" project-type project-name))
+         (finish-handle (format "malinka--handle-%s-finish" project-type)))
+    (malinka--info "Executing %s command: \"%s\"" project-type nbuild-cmd)
+    (malinka--info "Waiting for %s to finish" nbuild-cmd)
     (let ((process (start-process-shell-command process-name
                                                 (format "*%s*" process-name)
                                                 nbuild-cmd)))
       (set-process-query-on-exit-flag process nil)
-      (set-process-sentinel process 'malinka--handle-cmake-finish)
+      (set-process-sentinel process (intern finish-handle))
       (process-put process 'malinka-project-map project-map))))
 
 (defun malinka--handle-cmake-finish (process event)
@@ -730,7 +773,33 @@ EVENT is ignored."
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
+(defun malinka--handle-bear-finish (process event)
+  "Handle all events from the project bear command PROCESS.
+EVENT is ignored."
+  (when (memq (process-status process) '(signal exit))
+    (let* ((project-map       (process-get process 'malinka-project-map))
+           (project-name      (malinka--project-name project-map))
+           (build-dir         (malinka--project-build-directory project-map)))
+      (malinka--info "Bear command for \"%s\" finished. Proceeding to process the output" project-name)
+      ;; TODO We'd better do a basic check for generated compile_commands.json,
+      ;; such like: whether the compile_commands.json is empty, like just
+      ;; contains "[ ]". Because bear may failed, which will generate a
+      ;; compile_commands.json file with only "[ ]".
+      (with-temp-buffer
+        (malinka--select-project build-dir)))))
 
+(defun malinka--handle-compile-db-cmd-finish (process event)
+  "Handle all events from the project compiledb-cmd command PROCESS.
+EVENT is ignored."
+  (when (memq (process-status process) '(signal exit))
+    (let* ((project-map       (process-get process 'malinka-project-map))
+           (project-name      (malinka--project-name project-map))
+           (build-dir         (malinka--project-build-directory project-map))
+           (nbuild-cmd        (malinka--build-cmd-for-compiledb project-map "compile-db-cmd")))
+      (malinka--info "%s command for \"%s\" finished. Proceeding to process the output" nbuild-cmd project-name)
+      ;; TODO Do we need to handle irony issue as in malinka--handle-cmake-finish?
+      (with-temp-buffer
+        (malinka--select-project build-dir)))))
 
 ;;; --- rtags integration ---
 (defun malinka--rtags-invoke-with (&rest args)
@@ -876,13 +945,22 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
 (defun malinka--project-map-update-compiledb (project-map)
   "Update the compilation database for PROJECT-MAP.
 
-If the project's build system is cmake and the cmake version is compatible then
-create the compilation database with cmake.  Else execute the build command,
-parse the output and create the database manually."
-  (if (malinka--project-compatible-cmake? project-map)
-      (malinka--cmake-create-compiledb project-map)
-    ;; else execute the compile command and parse the output
-    (malinka--project-execute-compile-cmd project-map)))
+The control flow is:
+1. If compile-db-cmd is given, use it to create compile_commands.json.
+2. If it's cmake and the cmake version is compatible then create the
+compilation database with cmake.
+3. If the user's system has bear, prepend that to the compilation command to
+create the database
+4. Else execute the build command, parse the output and create the database
+manually."
+  (cond ((malinka--project-contains-compile-db-cmd? project-map)
+         (malinka--create-compiledb project-map "compile-db-cmd"))
+        ((malinka--project-compatible-cmake? project-map)
+         (malinka--create-compiledb project-map "cmake"))
+        ((malinka--have-bear?)
+         (malinka--create-compiledb project-map "bear"))
+        ;; else execute the compile command and parse the output
+        (t (malinka--project-execute-compile-cmd project-map))))
 
 (defun malinka--try-select-project (project)
   "Try to find and select a compilation database in PROJECT."
@@ -1091,7 +1169,7 @@ The returned compile attributes are in the form:
 If it's a cmake command and it made it this far it means user's cmake is
 unable to create the compilation database so add VERBOSE=1 to output the
 compilation commands so we have to request cmake to be verbose"
-  (if (malinka--build-cmd-cmake? configure-cmd)
+  (if (malinka--build-cmd-is-type? configure-cmd "cmake")
       (format "cd %s && %s && make VERBOSE=1" build-dir configure-cmd)
     (format "cd %s && %s" build-dir configure-cmd)))
 

@@ -78,6 +78,8 @@ the compilation database in the build directory.
 For all other cases, simple makefiles, scons, waf e.t.c. you have to provide the build command here making sure that it will
 provide visible compile output. You can simply add the =--dry-run= option in most build systems as this command should be used
 just to create the compilation database. The output will be parsed by malinka and the compilation database will be created.
+** compile-db-cmd
+This command instructs malinka in what way to generate the compilation database. =compile-db-cmd= takes precedence over configure-cmd. When =configure-cmd= is not enough to generate a correct compilation database, you should use =compile-db-cmd=. One example is when using ninja or bear to generate a compilation database. You should provide a command that could always generate a compilation database correctly. For example, you may add =bear make -B= to make sure it always generate a compilation database whenever current project has been already built.
 ** compile-cmd
 This is the command to compile the whole project. This is what will be given to projectile's =projectile-compile-project=
 to compile your project with your chosen keybinding. Default is: =C-c p c=
