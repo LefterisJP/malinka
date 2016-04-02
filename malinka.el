@@ -658,7 +658,7 @@ No need to reinvent the wheel."
 
 
 (defun malinka--build-cmd-is-type? (build-cmd build-type)
-  "Defun if a BUILD-CMD string continas BUILD-TYPE."
+  "Defun if a BUILD-CMD string contains BUILD-TYPE."
   (let* ((words (s-split " " build-cmd))
          (first (car words)))
     ;; just check if the first word is BUILD-TYPE
@@ -669,12 +669,12 @@ No need to reinvent the wheel."
   (malinka--build-cmd-is-type? (malinka--project-configure-cmd project-map) "cmake"))
 
 (defun malinka--have-bear? ()
-  "Detect if bear is installed on system."
+  "Detect if bear is installed on the system."
   (let ((path (s-split ":" (getenv "PATH"))))
-    (malinka--have-bear?-help path)))
+    (malinka--have-bear-impl path)))
 
-(defun malinka--have-bear?-help (path)
-  "Detect if bear is in path on system."
+(defun malinka--have-bear-impl (path)
+  "Detect if bear is in path on the system."
   (if path
       (if (file-executable-p (f-join (car path) "bear")) t
         (malinka--have-bear?-help (cdr path)))
@@ -711,13 +711,13 @@ Compatible means that it's of a big enough version in order to be able to genera
 		  nil))))))
 
 (defun malinka--project-contains-compile-db-cmd? (project-map)
-  "Detect if the malinka PROJECT-MAP contains none empty compile-db-cmd."
+  "Detect if the malinka PROJECT-MAP contains non-empty compile-db-cmd."
   (not (s-blank? (malinka--project-compile-db-cmd project-map))))
 
 (defun malinka--build-cmd-for-compiledb (project-map project-type)
   "Generate correct compile-db build cmd for different project type.
 
-Current support PROJECT-TYPE are: compile-db-cmd, cmake, bear."
+Currenttly supported PROJECT-TYPE are: compile-db-cmd, cmake, bear."
   (let* ((build-dir (malinka--project-build-directory project-map))
          (compile-db-cmd (malinka--project-compile-db-cmd project-map))
          (configure-cmd (malinka--project-configure-cmd project-map)))
@@ -781,8 +781,6 @@ EVENT is ignored."
            (project-name      (malinka--project-name project-map))
            (build-dir         (malinka--project-build-directory project-map)))
       (malinka--info "Bear command for \"%s\" finished. Proceeding to process the output" project-name)
-      ;; TODO Do we need to handle irony issue as in malinka--handle-cmake-finish?
-
       ;; TODO We'd better do a basic check for generated compile_commands.json,
       ;; such like: whether the compile_commands.json is empty, like just
       ;; contains "[ ]". Because bear may failed, which will generate a
