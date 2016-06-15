@@ -449,6 +449,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
 
 
 (defun malinka--process-compile-cmd (compile-cmd
+                                     configure-cmd
                                      root-directory
                                      build-directory)
   "Process COMPILE-CMD for a project at ROOT-DIRECTORY issued inside BUILD-DIRECTORY."
@@ -461,10 +462,16 @@ If USER is t then it's a user error, otherwise it's an internal error."
 	nil))
     (malinka--assert-string compile-cmd "compile command" t)
     (let ((new-compile-cmd
-	   (if build-directory
-	       (format "cd %s && %s" build-directory compile-cmd)
-	     ;;else
-	     compile-cmd)))
+           (if build-directory
+               (if (malinka--build-cmd-is-type? configure-cmd "cmake")
+                   (format
+                    "if [ ! -d %s ]; then mkdir -p %s && cd %s && %s; else cd %s; fi; %s"
+                    build-directory build-directory build-directory configure-cmd
+                    build-directory compile-cmd)
+                 ;; else
+                 (format "cd %s && %s" build-directory compile-cmd))
+             ;;else
+             compile-cmd)))
 
       (when (require 'projectile nil 'noerror)
 	(puthash root-directory
@@ -474,8 +481,8 @@ If USER is t then it's a user error, otherwise it's an internal error."
 
 (defun malinka--process-test-cmd (test-cmd
                                   root-directory
-                                  build-directory)
-  "Process TEST-CMD for a project at ROOT-DIRECTORY issued inside BUILD-DIRECTORY."
+				  test-directory)
+  "Process TEST-CMD for a project at ROOT-DIRECTORY with a given TEST-DIRECTORY."
   (when test-cmd
     (unless root-directory
       (progn
@@ -485,8 +492,8 @@ If USER is t then it's a user error, otherwise it's an internal error."
 	nil))
     (malinka--assert-string test-cmd "test command" t)
     (let ((new-test-cmd
-	   (if build-directory
-	       (format "cd %s && %s" build-directory test-cmd)
+	   (if test-directory
+	       (format "cd %s && %s" test-directory test-cmd)
 	     ;;else
 	     test-cmd)))
       (when (require 'projectile nil 'noerror)
@@ -516,6 +523,7 @@ If USER is t then it's a user error, otherwise it's an internal error."
 (defun* malinka-define-project (&key (name nil)
                                      (root-directory nil)
                                      (build-directory nil)
+                                     (test-directory nil)
                                      (configure-cmd nil)
                                      (compile-cmd nil)
                                      (compile-db-cmd nil)
@@ -545,7 +553,9 @@ The `compile-cmd' will be forwarded to projectile
 as the project's compile command. Default keybinding: C-c p c
 
 A user can also provide a `test-cmd' which will be forwarded to projectile
-as the project's test command. Default keybinding: C-c p P
+as the project's test command. Default keybinding: C-c p P. If a `test-directory'
+is given then the test command will be run from there, if not it will be ran from the
+root directory.
 
 A project can also have a `run-cmd' which will be forwarded to projectile as the
 project's run command. Default keybinding: C-c p u.
@@ -555,21 +565,25 @@ The project is added to the global `malinka--projects-map'"
       (progn
         (malinka--assert-string name "project name" t)
         (malinka--assert-directory root-directory "project root directory" t)
-        (malinka--assert-directory build-directory "project build directory" t)
+	;; unless it's a cmake command, make sure build-dir exists
+        (unless (malinka--build-cmd-is-type? configure-cmd "cmake")
+	  (malinka--assert-directory build-directory "project build directory" t))
         (when configure-cmd (malinka--assert-string configure-cmd "configure command" t))
         (when compile-db-cmd (malinka--assert-string compile-db-cmd "compile-db-cmd command" t))
 
         (let* ((new-root-directory (f-slash root-directory))
                (new-build-directory (f-slash build-directory))
+	       (new-test-directory (if test-directory (f-slash test-directory) new-root-directory))
                (new-run-cmd (malinka--process-run-cmd run-cmd new-root-directory))
                (new-compile-cmd (malinka--process-compile-cmd
                                  compile-cmd
+                                 configure-cmd
                                  new-root-directory
                                  new-build-directory))
                (new-test-cmd (malinka--process-test-cmd
                               test-cmd
                               new-root-directory
-                              new-build-directory)))
+                              new-test-directory)))
 
           (when (gethash name malinka--projects-map)
             (malinka--warning "Redefining project map for \"%s\"" name))
@@ -827,7 +841,7 @@ Returns the output of the command as a string or nil in case of error"
       (setq rtags-rdm-process nil)
       (when (get-buffer "*rdm*")
         (kill-buffer "*rdm*"))))
-  (if (rtags-start-process-maybe)
+  (if (rtags-start-process-unless-running)
       t
       ;else
       (malinka--error "Could not find rtags daemon in the system")))
