@@ -780,10 +780,10 @@ EVENT is ignored."
       (kill-buffer buffer)
       ;; for some reason irony seems to stop autodetecting the compile database
       ;; in cmake build dir so let' copy it to the root directory too. Not very elegant solution
-	  (let ((root-cdb (f-join root-dir "compile_commands.json")))
-
-		(when (f-exists? root-cdb) (f-delete root-cdb))
-		(f-copy compile-database root-cdb))
+      (unless (string-equal root-dir build-dir)
+        (let ((root-cdb (f-join root-dir "compile_commands.json")))
+          (when (f-exists? root-cdb) (f-delete root-cdb))
+          (f-copy compile-database root-cdb)))
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
