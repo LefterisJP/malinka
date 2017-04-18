@@ -1,4 +1,4 @@
-;;; malinka.el --- A C/C++ project configuration package for Emacs
+;;; malinka.el --- A C/C++ project configuration package for Emacs -*- lexical-binding: t; -*-
 ;;
 
 ;; Copyright © 2014-2015 Lefteris Karapetsas <lefteris@refu.co>
@@ -234,30 +234,55 @@ Run each time `malinka-idle-project-check-seconds' have passed
              (query (malinka--file-belongs-to-project filename)))
         (when query
           (let ((project  (nth 0 query))
-                (fileattr (nth 1 query)))
+                (fileattr (nth 1 query))
+                (inhibit-message t))
             (malinka--rtags-assert-rdm-runs)
-	    (cond
-             ;; if file check results show that the project is not configured
-             ;; nothing is being configured right now
-             ;; and it's not a cmake 2.8.5 project or bear project then configure it
-             ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+            (malinka--async-rtags-is-indexing?
+             (lambda (rtags-indexing-p)
+               (if rtags-indexing-p
+                   ;; Make sure that rtags knows about project.
+                   (malinka--try-make-project-known-and-loaded project)
+                 ;; if file check results show that the project is not configured
+                 ;; nothing is being configured right now
+                 ;; and it's not a cmake 2.8.5 project or bear project then configure it
+                 ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+                 ;; TODO: Does added bear and compile-db-cmd type need some processing here?
+                 (if (and (eq fileattr 'not-configured)
+                          (not (malinka--project-compatible-cmake? project))
+                          (not (malinka--project-being-configured? project)))
+                     (progn
+                       (malinka--info
+                        "Project \"%s\" does not seem to be configured. Configuring ..."
+                        (malinka--project-name project))
+                       (malinka--project-map-update-compiledb project))
+                   (malinka--try-make-project-known-and-loaded project))))
+             )))))))
 
-             ;; TODO: Does added bear and compile-db-cmd type need some processing here?
-             ((and (eq fileattr 'not-configured)
-                   (not (malinka--project-compatible-cmake? project))
-                   (not (malinka--rtags-is-indexing?))
-                   (not (malinka--project-being-configured? project)))
-              (malinka--info "Project \"%s\" does not seem to be configured. Configuring ..." (malinka--project-name project))
-              (malinka--project-map-update-compiledb project))
-             ;; else make sure that rtags knows about it
-             ((not (malinka--rtags-project-known? project))
-              (malinka--info "Rtags does not know about \"%s\". Informing it." (malinka--project-name project))
-              (malinka--project-create-or-select-compiledb project))
-
-             ((not (malinka--rtags-project-loaded? project))
-              (malinka--info "Rtags knows about \"%s\" but does not have it loaded. Loading it." (malinka--project-name project))
-              (malinka--try-select-project project)))))))))
-
+(defun malinka--try-make-project-known-and-loaded (project)
+  "Asynchronously check if PROJECT is known to Rtags.
+If PROJECT is known, check if it is loaded. If it isn't loaded, load it.
+If PROJECT is not known to Rtags, let Rtags know about it."
+  (malinka--async-rtags-project-known?
+   project
+   (lambda (project-known-p)
+     (if project-known-p
+         (progn
+           (malinka--debug "Rtags knows about \"%s\"."
+                           (malinka--project-name project))
+           (malinka--async-rtags-project-loaded?
+            project
+            (lambda (project-loaded-p)
+              (if project-loaded-p
+                  (malinka--debug "\"%s\" is loaded by Rtags."
+                                  (malinka--project-name project))
+                (malinka--info
+                 "Rtags knows about \"%s\" but does not have it loaded. Loading it."
+                 (malinka--project-name project))
+                (malinka--try-select-project project)))))
+       (malinka--info
+        "Rtags does not know about \"%s\". Informing it."
+        (malinka--project-name project))
+       (malinka--project-create-or-select-compiledb project)))))
 
 ;;; --- Utility functions ---
 (defun malinka--file-indexed-by-project (filepath project)
@@ -815,7 +840,8 @@ EVENT is ignored."
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
-;;; --- rtags integration ---
+;;; --- Rtags Integration ---
+
 (defun malinka--rtags-invoke-with (&rest args)
   "Invoke rc (rtags executable) with ARGS as arguments.
 
@@ -865,6 +891,70 @@ Returns the output of the command as a string or nil in case of error"
          (project-root (malinka--project-root-directory project))
          (loadedlist (s-match (format "%s.*" project-root) output)))
     loadedlist))
+
+(defun malinka--async-rtags-invoke-with (callback &rest args)
+  "Invoke rc (rtags executable) with ARGS as arguments.
+
+Returns the output of the command in CALLBACK."
+  (when (malinka--rtags-assert-rdm-runs)
+    (let* ((rc (rtags-executable-find "rc"))
+           (cmd (s-join " " (cons rc args))))
+      (when rc
+        (async-shell-command-to-string cmd callback)))))
+
+(defun malinka--async-rtags-is-indexing? (callback)
+  "Check if rtags is currently indexing anything asynchronously."
+  (malinka--async-rtags-invoke-with
+   (lambda (result)
+     (funcall callback (= (string-to-number result) 1)))
+   "--is-indexing"))
+
+(defun malinka--async-rtags-project-known? (project callback)
+  "Check if rtags knows about PROJECT."
+  (malinka--async-rtags-invoke-with
+   (lambda (output)
+     (let* ((project-root
+             (expand-file-name (malinka--project-root-directory project)))
+            (loadedlist (or
+                         (s-match project-root output)
+                         (s-match (format "%s.*" project-root) output))))
+       (funcall callback loadedlist)))
+   "-w"))
+
+(defun malinka--async-rtags-project-loaded? (project callback)
+  "Check if rtags has loaded PROJECT."
+  (malinka--async-rtags-invoke-with
+   (lambda (output)
+     (let* ((loadedlist (s-match "\\(.*\\) <=" output))
+            (dir (when loadedlist (nth 1 loadedlist))))
+       (when dir
+         (funcall
+          callback (f-equal? dir (malinka--project-root-directory project))))))
+   "-w"))
+
+(defun async-shell-command-to-string (command callback)
+  "Execute shell command COMMAND asynchronously in the
+  background.
+Return the temporary output buffer which command is writing to
+during execution.
+When the command is finished, call CALLBACK with the resulting
+output as a string.
+Synopsis:
+  (async-shell-command-to-string \"echo hello\" (lambda (s) (message \"RETURNED (%s)\" s)))
+"
+  (let ((output-buffer (generate-new-buffer " *temp*")))
+    (set-process-sentinel
+     (start-process "Shell" output-buffer shell-file-name shell-command-switch command)
+     (lambda (process _signal)
+       (when (memq (process-status process) '(exit signal))
+         (with-current-buffer output-buffer
+           (let ((output-string
+                  (buffer-substring-no-properties
+                   (point-min)
+                   (point-max))))
+             (funcall callback output-string)))
+         (kill-buffer output-buffer))))
+    output-buffer))
 
 ;;; --- Functions related to creating the compilation database ---
 
@@ -995,14 +1085,14 @@ manually."
 A compilecommands.json compilation database must already exist there.
 This feeds the compilation database to rtags."
   (let ((cdb-file (f-join directory "compile_commands.json")))
-  (when (malinka--rtags-assert-rdm-runs)
-    (if (f-exists? cdb-file)
-        (progn
-          (malinka--info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
-          (malinka--rtags-invoke-with "-W" directory)
-          (malinka--rtags-invoke-with "-J" directory))
-      ;; else
-      (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
+    (when (malinka--rtags-assert-rdm-runs)
+      (if (f-exists? cdb-file)
+          (progn
+            (malinka--info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
+            (malinka--async-rtags-invoke-with
+             (lambda (_result) t) "-J" directory))
+        ;; else
+        (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
 
 (defun malinka--handle-compile-finish (process event)
   "Handle all events from the project compilation PROCESS.
