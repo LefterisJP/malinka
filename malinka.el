@@ -1,4 +1,4 @@
-;;; malinka.el --- A C/C++ project configuration package for Emacs
+;;; malinka.el --- A C/C++ project configuration package for Emacs -*- lexical-binding: t; -*-
 ;;
 
 ;; Copyright © 2014-2015 Lefteris Karapetsas <lefteris@refu.co>
@@ -103,12 +103,12 @@ nil
   (list compiler (f-full (shell-command-to-string (format "which %s" compiler)))))
 
 (defcustom malinka-supported-compilers `(,(malinka--compiler-create "gcc")
-					 ,(malinka--compiler-create "cc")
-					 ,(malinka--compiler-create "g++")
-					 ,(malinka--compiler-create "clang")
-					 ,(malinka--compiler-create "clang++")
-					 ,(malinka--compiler-create "c++"))
-"A list of compiler executable names that are recognized and supported by malinka."
+                                         ,(malinka--compiler-create "cc")
+                                         ,(malinka--compiler-create "g++")
+                                         ,(malinka--compiler-create "clang")
+                                         ,(malinka--compiler-create "clang++")
+                                         ,(malinka--compiler-create "c++"))
+  "A list of compiler executable names that are recognized and supported by malinka."
   :group 'malinka
   :type '(repeat (string :tag "Supported compilers"))
   ;; :safe #'malinka--string-list-p
@@ -174,19 +174,19 @@ nil
   (make-hash-table :test 'equal)
   "Global hash map containing all projects known to malinka.")
 
-; --- Helper Macros ---
+;; --- Helper Macros ---
 (defmacro malinka--project-name-get (attribute name)
   "Get the value of ATTRIBUTE for project NAME."
   `(let ((project-map (gethash ,name malinka--projects-map)))
      (,(intern (format "malinka--project-%s" (symbol-name attribute))) project-map)))
 
 (defmacro malinka--error (fmt &rest args)
-"Issue an internal error, by passing FMT and ARGS to (error)."
-`(error (concat "Malinka-error: " ,fmt) ,@args))
+  "Issue an internal error, by passing FMT and ARGS to (error)."
+  `(error (concat "Malinka-error: " ,fmt) ,@args))
 
 (defmacro malinka-user-error (fmt &rest args)
-"Issue a user error, by passing FMT and ARGS to (error)."
-`(user-error (concat "Malinka-user-error: " ,fmt) ,@args))
+  "Issue a user error, by passing FMT and ARGS to (error)."
+  `(user-error (concat "Malinka-user-error: " ,fmt) ,@args))
 
 (defmacro malinka--info (fmt &rest args)
   "Depending on the value of `malinka-print-info?' this macro will print messages by passing FMT and ARGS to message."
@@ -195,7 +195,7 @@ nil
 
 (defmacro malinka--warning-always (fmt &rest args)
   "This macro will print messages by passing FMT and ARGS to message."
-     `(message (concat "Malinka-warning: " ,fmt) ,@args))
+  `(message (concat "Malinka-warning: " ,fmt) ,@args))
 
 (defmacro malinka--warning (fmt &rest args)
   "Depending on the value of `malinka-print-warning?' this macro will print messages by passing FMT and ARGS to message."
@@ -234,30 +234,55 @@ Run each time `malinka-idle-project-check-seconds' have passed
              (query (malinka--file-belongs-to-project filename)))
         (when query
           (let ((project  (nth 0 query))
-		(fileattr (nth 1 query)))
+                (fileattr (nth 1 query))
+                (inhibit-message t))
             (malinka--rtags-assert-rdm-runs)
-	    (cond
-             ;; if file check results show that the project is not configured
-             ;; nothing is being configured right now
-             ;; and it's not a cmake 2.8.5 project or bear project then configure it
-             ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+            (malinka--async-rtags-is-indexing?
+             (lambda (rtags-indexing-p)
+               (if rtags-indexing-p
+                   ;; Make sure that rtags knows about project.
+                   (malinka--try-make-project-known-and-loaded project)
+                 ;; if file check results show that the project is not configured
+                 ;; nothing is being configured right now
+                 ;; and it's not a cmake 2.8.5 project or bear project then configure it
+                 ;; TODO: For cmake 2.8.5 we need to somehow parse a files-list
+                 ;; TODO: Does added bear and compile-db-cmd type need some processing here?
+                 (if (and (eq fileattr 'not-configured)
+                          (not (malinka--project-compatible-cmake? project))
+                          (not (malinka--project-being-configured? project)))
+                     (progn
+                       (malinka--info
+                        "Project \"%s\" does not seem to be configured. Configuring ..."
+                        (malinka--project-name project))
+                       (malinka--project-map-update-compiledb project))
+                   (malinka--try-make-project-known-and-loaded project))))
+             )))))))
 
-             ;; TODO: Does added bear and compile-db-cmd type need some processing here?
-             ((and (eq fileattr 'not-configured)
-                   (not (malinka--project-compatible-cmake? project))
-                   (not (malinka--rtags-is-indexing?))
-                   (not (malinka--project-being-configured? project)))
-              (malinka--info "Project \"%s\" does not seem to be configured. Configuring ..." (malinka--project-name project))
-              (malinka--project-map-update-compiledb project))
-             ;; else make sure that rtags knows about it
-             ((not (malinka--rtags-project-known? project))
-              (malinka--info "Rtags does not know about \"%s\". Informing it." (malinka--project-name project))
-              (malinka--project-create-or-select-compiledb project))
-
-             ((not (malinka--rtags-project-loaded? project))
-              (malinka--info "Rtags knows about \"%s\" but does not have it loaded. Loading it." (malinka--project-name project))
-              (malinka--try-select-project project)))))))))
-
+(defun malinka--try-make-project-known-and-loaded (project)
+  "Asynchronously check if PROJECT is known to Rtags.
+If PROJECT is known, check if it is loaded. If it isn't loaded, load it.
+If PROJECT is not known to Rtags, let Rtags know about it."
+  (malinka--async-rtags-project-known?
+   project
+   (lambda (project-known-p)
+     (if project-known-p
+         (progn
+           (malinka--debug "Rtags knows about \"%s\"."
+                           (malinka--project-name project))
+           (malinka--async-rtags-project-loaded?
+            project
+            (lambda (project-loaded-p)
+              (if project-loaded-p
+                  (malinka--debug "\"%s\" is loaded by Rtags."
+                                  (malinka--project-name project))
+                (malinka--info
+                 "Rtags knows about \"%s\" but does not have it loaded. Loading it."
+                 (malinka--project-name project))
+                (malinka--try-select-project project)))))
+       (malinka--info
+        "Rtags does not know about \"%s\". Informing it."
+        (malinka--project-name project))
+       (malinka--project-create-or-select-compiledb project)))))
 
 ;;; --- Utility functions ---
 (defun malinka--file-indexed-by-project (filepath project)
@@ -369,7 +394,7 @@ if it has the same name check predicate then it also checks that it's not
 the current project."
   (let ((project-map (gethash name malinka--projects-map)))
     (when project-map
-      ; if we need to check for the name, do that, else return true
+      ;; if we need to check for the name, do that, else return true
       (if (cdr (assoc 'same-name-check (cdr project-map)))
           (not (string= malinka--current-project-name name))
         t))))
@@ -377,9 +402,9 @@ the current project."
 (defun malinka--project-being-configured? (project)
   "Check if project is currently being configured."
   (let* ((name      (malinka--project-name project))
-		 (buffname  (format "*malinka-compile-command-%s*" name))
-		 (buffname2 (format "*malinka-compile-command-%s*" name)))
-	(when (or (get-buffer buffname) (get-buffer buffname2)) t)))
+         (buffname  (format "*malinka-compile-command-%s*" name))
+         (buffname2 (format "*malinka-compile-command-%s*" name)))
+    (when (or (get-buffer buffname) (get-buffer buffname2)) t)))
 
 (defun malinka--cfile? (file)
   "Return non-nil only if the FILE is related to C/C++."
@@ -407,12 +432,12 @@ Otherwise throw an error.  If USER is t then it's a user error, otherwise
  it's an internal error."
   (unless (stringp dir)
     (if user
-	(malinka-user-error "Should provide a string for %s" description)
+        (malinka-user-error "Should provide a string for %s" description)
       (malinka--error "Non-string type for %s variable detected" description)))
   (unless (f-directory? dir)
     (if user
-	(malinka-user-error
-	 "Provided string \"%s\" for %s is not a directory" dir description)
+        (malinka-user-error
+         "Provided string \"%s\" for %s is not a directory" dir description)
       (malinka--error
        "%s variable string \"%s\" is not a directory" description dir))))
 
@@ -421,7 +446,7 @@ Otherwise throw an error.  If USER is t then it's a user error, otherwise
 If USER is t then it's a user error, otherwise it's an internal error."
   (unless (stringp var)
     (if user
-	(malinka-user-error "Should provide a string for %s" description)
+        (malinka-user-error "Should provide a string for %s" description)
       (malinka--error "Non-string type for %s variable detected" description))))
 
 ;;; --- Elisp internal API
@@ -456,10 +481,10 @@ If USER is t then it's a user error, otherwise it's an internal error."
   (when compile-cmd
     (unless root-directory
       (progn
-	(malinka--error
-	 "Provided compile-cmd \"%s\" for a project without a root directory"
-	 compile-cmd)
-	nil))
+        (malinka--error
+         "Provided compile-cmd \"%s\" for a project without a root directory"
+         compile-cmd)
+        nil))
     (malinka--assert-string compile-cmd "compile command" t)
     (let ((new-compile-cmd
            (if build-directory
@@ -474,32 +499,32 @@ If USER is t then it's a user error, otherwise it's an internal error."
              compile-cmd)))
 
       (when (require 'projectile nil 'noerror)
-	(puthash root-directory
-		 new-compile-cmd
-		 projectile-compilation-cmd-map))
+        (puthash root-directory
+                 new-compile-cmd
+                 projectile-compilation-cmd-map))
       new-compile-cmd)))
 
 (defun malinka--process-test-cmd (test-cmd
                                   root-directory
-				  test-directory)
+                                  test-directory)
   "Process TEST-CMD for a project at ROOT-DIRECTORY with a given TEST-DIRECTORY."
   (when test-cmd
     (unless root-directory
       (progn
-	(malinka--error
-	 "Provided test-cmd \"%s\" for a project without a root directory"
-	 test-cmd)
-	nil))
+        (malinka--error
+         "Provided test-cmd \"%s\" for a project without a root directory"
+         test-cmd)
+        nil))
     (malinka--assert-string test-cmd "test command" t)
     (let ((new-test-cmd
-	   (if test-directory
-	       (format "cd %s && %s" test-directory test-cmd)
-	     ;;else
-	     test-cmd)))
+           (if test-directory
+               (format "cd %s && %s" test-directory test-cmd)
+             ;;else
+             test-cmd)))
       (when (require 'projectile nil 'noerror)
-	(puthash root-directory
-		 new-test-cmd
-		 projectile-test-cmd-map))
+        (puthash root-directory
+                 new-test-cmd
+                 projectile-test-cmd-map))
       new-test-cmd)))
 
 (defun malinka--process-run-cmd (run-cmd root-directory)
@@ -507,17 +532,17 @@ If USER is t then it's a user error, otherwise it's an internal error."
   (when run-cmd
     (unless root-directory
       (progn
-	(malinka--error
-	 "Provided run-cmd \"%s\" for a project without a root directory"
-	 run-cmd)
-	nil))
+        (malinka--error
+         "Provided run-cmd \"%s\" for a project without a root directory"
+         run-cmd)
+        nil))
     (malinka--assert-string run-cmd "run command" t)
     (let ((new-run-cmd
-	   (format "cd %s && %s" root-directory run-cmd)))
+           (format "cd %s && %s" root-directory run-cmd)))
       (when (require 'projectile nil 'noerror)
-	(puthash root-directory
-		 new-run-cmd
-		 projectile-run-cmd-map))
+        (puthash root-directory
+                 new-run-cmd
+                 projectile-run-cmd-map))
       new-run-cmd)))
 
 (defun* malinka-define-project (&key (name nil)
@@ -565,15 +590,15 @@ The project is added to the global `malinka--projects-map'"
       (progn
         (malinka--assert-string name "project name" t)
         (malinka--assert-directory root-directory "project root directory" t)
-	;; unless it's a cmake command, make sure build-dir exists
+        ;; unless it's a cmake command, make sure build-dir exists
         (unless (malinka--build-cmd-is-type? configure-cmd "cmake")
-	  (malinka--assert-directory build-directory "project build directory" t))
+          (malinka--assert-directory build-directory "project build directory" t))
         (when configure-cmd (malinka--assert-string configure-cmd "configure command" t))
         (when compile-db-cmd (malinka--assert-string compile-db-cmd "compile-db-cmd command" t))
 
         (let* ((new-root-directory (f-slash root-directory))
                (new-build-directory (f-slash build-directory))
-	       (new-test-directory (if test-directory (f-slash test-directory) new-root-directory))
+               (new-test-directory (if test-directory (f-slash test-directory) new-root-directory))
                (new-run-cmd (malinka--process-run-cmd run-cmd new-root-directory))
                (new-compile-cmd (malinka--process-compile-cmd
                                  compile-cmd
@@ -635,7 +660,7 @@ ARGUMENTS are all the other compiler arguments for the file."
 ELEM can be either a single element or another list"
   (if (listp elem)
       (append elem list)
-      (cons elem list)))
+    (cons elem list)))
 
 (defun malinka--defined-project-names ()
   "Return all defined project names known to malinka sorted alphabetically."
@@ -660,7 +685,7 @@ No need to reinvent the wheel."
 
 
 (defun malinka--project-detect-name ()
-"Detect the name of the project of the current buffer."
+  "Detect the name of the project of the current buffer."
   (let ((dir (malinka--project-detect-root)))
     (when dir
       (malinka--project-name-from-root dir))))
@@ -699,8 +724,8 @@ No need to reinvent the wheel."
 
 Compatible means that it's of a big enough version in order to be able to generate a compilation database."
   (when (and
-	 (malinka--project-cmake? project-map)
-	 (malinka--cmake-compatible-version?)) t))
+         (malinka--project-cmake? project-map)
+         (malinka--cmake-compatible-version?)) t))
 
 (defun malinka--cmake-compatible-version? ()
   "Detect if we have cmake version greater than 2.8.5 to support compilation database creation"
@@ -708,21 +733,21 @@ Compatible means that it's of a big enough version in order to be able to genera
          (got-cmake (s-match "cmake version \\([0-9]+\\)\.\\([0-9]+\\)\.\\([0-9]+\\)" str)))
     (when got-cmake
       (let ((major-version (string-to-number (nth 1 got-cmake)))
-			(minor-version (string-to-number(nth 2 got-cmake)))
-			(patch-version (string-to-number(nth 3 got-cmake))))
+            (minor-version (string-to-number(nth 2 got-cmake)))
+            (patch-version (string-to-number(nth 3 got-cmake))))
         (malinka--debug "We got cmake version %s.%s.%s" major-version
-						minor-version
-						patch-version)
-		(cond
-		 ((>= major-version 3) t)
-		 ((= major-version 2)
-		  (cond
-		   ((= minor-version 8)
-			(if (>= patch-version 5) t nil))
-		   ((> minor-version 8) t)
-		   ((< minor-version 8) nil)))
-		 (:else ;; major version being 1 means not supported
-		  nil))))))
+                        minor-version
+                        patch-version)
+        (cond
+         ((>= major-version 3) t)
+         ((= major-version 2)
+          (cond
+           ((= minor-version 8)
+            (if (>= patch-version 5) t nil))
+           ((> minor-version 8) t)
+           ((< minor-version 8) nil)))
+         (:else ;; major version being 1 means not supported
+          nil))))))
 
 (defun malinka--project-contains-compile-db-cmd? (project-map)
   "Detect if the malinka PROJECT-MAP contains non-empty compile-db-cmd."
@@ -815,25 +840,11 @@ EVENT is ignored."
       (with-temp-buffer
         (malinka--select-project build-dir)))))
 
-;;; --- rtags integration ---
-(defun malinka--rtags-invoke-with (&rest args)
-  "Invoke rc (rtags executable) with ARGS as arguments.
-
-Returns the output of the command as a string or nil in case of error"
-  (when (malinka--rtags-assert-rdm-runs)
-    (let* ((rc (rtags-executable-find "rc"))
-           (cmd (s-join " " (cons rc args))))
-      (when rc
-        (shell-command-to-string cmd)))))
-
-(defun malinka--rtags-file-indexed-p (filename)
-  "Ask rtags if it knows about FILENAME."
-  (let ((output (s-trim (malinka--rtags-invoke-with "--is-indexed" filename))))
-    (string-equal output "indexed")))
+;;; --- Rtags Integration ---
 
 (defun malinka--rtags-assert-rdm-runs ()
   "Assert that the rtags daemon is running."
-  ; if the process has been messed with by outside sources clean it up
+  ;; if the process has been messed with by outside sources clean it up
   (let ((status (if rtags-rdm-process (process-status rtags-rdm-process) nil)))
     (when (or (not status) (memq status '(exit signal closed failed)))
       (when rtags-rdm-process
@@ -843,28 +854,72 @@ Returns the output of the command as a string or nil in case of error"
         (kill-buffer "*rdm*"))))
   (if (rtags-start-process-unless-running)
       t
-      ;else
-      (malinka--error "Could not find rtags daemon in the system")))
+    ;; else
+    (malinka--error "Could not find rtags daemon in the system")))
 
-(defun malinka--rtags-is-indexing? ()
-  "Check if rtags is currently indexing anything"
-  (let ((result (string-to-number (malinka--rtags-invoke-with "--is-indexing"))))
-    (when (= result 1) t)))
+(defun malinka--async-rtags-invoke-with (callback &rest args)
+  "Invoke rc (rtags executable) with ARGS as arguments.
 
-(defun malinka--rtags-project-loaded? (project)
-  "Check if rtags has loaded PROJECT."
-  (let* ((output (malinka--rtags-invoke-with "-w"))
-         (loadedlist (s-match "\\(.*\\) <=" output))
-         (dir (when loadedlist (nth 1 loadedlist))))
-    (when dir
-      (f-equal? dir (malinka--project-root-directory project)))))
+Returns the output of the command in CALLBACK."
+  (when (malinka--rtags-assert-rdm-runs)
+    (let* ((rc (rtags-executable-find "rc"))
+           (cmd (s-join " " (cons rc args))))
+      (when rc
+        (async-shell-command-to-string cmd callback)))))
 
-(defun malinka--rtags-project-known? (project)
+(defun malinka--async-rtags-is-indexing? (callback)
+  "Check if rtags is currently indexing anything asynchronously."
+  (malinka--async-rtags-invoke-with
+   (lambda (result)
+     (funcall callback (= (string-to-number result) 1)))
+   "--is-indexing"))
+
+(defun malinka--async-rtags-project-known? (project callback)
   "Check if rtags knows about PROJECT."
-  (let* ((output       (malinka--rtags-invoke-with "-w"))
-         (project-root (malinka--project-root-directory project))
-         (loadedlist (s-match (format "%s.*" project-root) output)))
-    loadedlist))
+  (malinka--async-rtags-invoke-with
+   (lambda (output)
+     (let* ((project-root
+             (expand-file-name (malinka--project-root-directory project)))
+            (loadedlist (or
+                         (s-match project-root output)
+                         (s-match (format "%s.*" project-root) output))))
+       (funcall callback loadedlist)))
+   "-w"))
+
+(defun malinka--async-rtags-project-loaded? (project callback)
+  "Check if rtags has loaded PROJECT."
+  (malinka--async-rtags-invoke-with
+   (lambda (output)
+     (let* ((loadedlist (s-match "\\(.*\\) <=" output))
+            (dir (when loadedlist (nth 1 loadedlist))))
+       (when dir
+         (funcall
+          callback (f-equal? dir (malinka--project-root-directory project))))))
+   "-w"))
+
+(defun async-shell-command-to-string (command callback)
+  "Execute shell command COMMAND asynchronously in the
+  background.
+Return the temporary output buffer which command is writing to
+during execution.
+When the command is finished, call CALLBACK with the resulting
+output as a string.
+Synopsis:
+  (async-shell-command-to-string \"echo hello\" (lambda (s) (message \"RETURNED (%s)\" s)))
+"
+  (let ((output-buffer (generate-new-buffer " *temp*")))
+    (set-process-sentinel
+     (start-process "Shell" output-buffer shell-file-name shell-command-switch command)
+     (lambda (process _signal)
+       (when (memq (process-status process) '(exit signal))
+         (with-current-buffer output-buffer
+           (let ((output-string
+                  (buffer-substring-no-properties
+                   (point-min)
+                   (point-max))))
+             (funcall callback output-string)))
+         (kill-buffer output-buffer))))
+    output-buffer))
 
 ;;; --- Functions related to creating the compilation database ---
 
@@ -891,16 +946,16 @@ Returns the output of the command as a string or nil in case of error"
          (executable    (malinka--file-attributes-executable file-attr))
          (filename      (malinka--file-attributes-name file-attr))
          (abs-filename  (f-join (malinka--file-attributes-directory file-attr) filename)))
-         (s-concat executable
-                   " "
-                   (s-join " " arguments)
-                   " "
-                   (malinka--project-command-form-defines defines)
-                   " "
-                   (malinka--project-command-form-includes includes)
-                   " -c -o "
-                   (s-append ".o " (f-no-ext abs-filename))
-                   abs-filename)))
+    (s-concat executable
+              " "
+              (s-join " " arguments)
+              " "
+              (malinka--project-command-form-defines defines)
+              " "
+              (malinka--project-command-form-includes includes)
+              " -c -o "
+              (s-append ".o " (f-no-ext abs-filename))
+              abs-filename)))
 
 (defun malinka--project-create-json-list (project)
   "Create the json association list for this PROJECT."
@@ -910,16 +965,16 @@ Returns the output of the command as a string or nil in case of error"
             (filename       (malinka--file-attributes-name item))
             (abs-filename   (f-join (malinka--file-attributes-directory item) filename)))
        (json-encode-alist
-	`((directory . ,(malinka--project-build-directory project))
-	  (command . ,command-string)
-	  (file . ,abs-filename)))))
+        `((directory . ,(malinka--project-build-directory project))
+          (command . ,command-string)
+          (file . ,abs-filename)))))
    (malinka--project-files-list project)))
 
 (defun malinka--project-json-representation (project)
-"Return the json representation of the compilation DB for PROJECT."
-  ; build an association list with all the data for each file
-  ; json-encode does not seem to work for a list of dicts, so we
-  ; have to build it manually
+  "Return the json representation of the compilation DB for PROJECT."
+  ;; build an association list with all the data for each file
+  ;; json-encode does not seem to work for a list of dicts, so we
+  ;; have to build it manually
   (let* ((json-list (malinka--project-create-json-list project)))
     (format "[\n%s\n]" (s-join
                         ",\n" (-map 'malinka--json-format-escapes json-list)))))
@@ -938,7 +993,7 @@ If DIR is provided then its' written there.
 For more information on the compilations database please refer here:
 http://clang.llvm.org/docs/JSONCompilationDatabase.html"
   (let* ((write-dir (if dir dir (malinka--project-root-directory project-map)))
-	 (db-file-name (f-join write-dir "compile_commands.json"))
+         (db-file-name (f-join write-dir "compile_commands.json"))
          (json-string (malinka--project-json-representation project-map)))
     (malinka--compiledb-write json-string db-file-name)))
 
@@ -995,14 +1050,14 @@ manually."
 A compilecommands.json compilation database must already exist there.
 This feeds the compilation database to rtags."
   (let ((cdb-file (f-join directory "compile_commands.json")))
-  (when (malinka--rtags-assert-rdm-runs)
-    (if (f-exists? cdb-file)
-        (progn
-          (malinka--info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
-          (malinka--rtags-invoke-with "-W" directory)
-          (malinka--rtags-invoke-with "-J" directory))
-      ;; else
-      (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
+    (when (malinka--rtags-assert-rdm-runs)
+      (if (f-exists? cdb-file)
+          (progn
+            (malinka--info "Feeding compile database file: \"%s\" to RTAGS" cdb-file)
+            (malinka--async-rtags-invoke-with
+             (lambda (_result) t) "-J" directory))
+        ;; else
+        (malinka-user-error "Could not find a compilation database file in directory %s" directory)))))
 
 (defun malinka--handle-compile-finish (process event)
   "Handle all events from the project compilation PROCESS.
@@ -1028,24 +1083,24 @@ EVENT is ignored."
 
 
 
-; --- Minibuffer utilities ---
+;; --- Minibuffer utilities ---
 (defvar malinka--read-project-history nil
   "`completing-read' history of `malinka--read-project'.")
 
 (defun malinka--default-project ()
-"Select a default project if possible.  If not return nil."
-(let ((name (malinka--project-detect-name)))
-  (when (-contains? (malinka--defined-project-names) name)
-    name)))
+  "Select a default project if possible.  If not return nil."
+  (let ((name (malinka--project-detect-name)))
+    (when (-contains? (malinka--defined-project-names) name)
+      name)))
 
 
-; --- Makefile/Build command reading ---
+;; --- Makefile/Build command reading ---
 (defun malinka--configoutput-line-get-file (words index)
-"Return the compiled file from a list of WORDS at the given INDEX.
+  "Return the compiled file from a list of WORDS at the given INDEX.
 
 Note: INDEX can also be nil in which case nil is returned."
-(when index
-  (nth index words)))
+  (when index
+    (nth index words)))
 
 (defun malinka--includes-make-absolute (includes project)
   "Return the INCLUDES list of PROJECT with all relative paths turned absolute."
@@ -1059,7 +1114,7 @@ Note: INDEX can also be nil in which case nil is returned."
 Returns the modified list if modified and the same list if not."
   (let ((sublist (nth ind attribute-list)))
     (if (-contains? sublist element)
-	attribute-list
+        attribute-list
       ;;else
       (-replace-at ind (-snoc sublist element) attribute-list))))
 
@@ -1084,12 +1139,12 @@ the proper directory and filename for the path.
 
 Returns a tuple in the form of '(DIRECTORY FILENAME)"
   (let ((name (f-filename filepath))
-	(dir  (f-dirname filepath)))
+        (dir  (f-dirname filepath)))
     (if (f-relative? filepath)
-	(let ((fullpath (f-join build-dir filepath)))
-	  (unless (f-file? fullpath)
-	    (malinka--error "Error in compile command detected.  \"%s\" is not a file" fullpath))
-	  `(,(f-dirname fullpath) ,name))
+        (let ((fullpath (f-join build-dir filepath)))
+          (unless (f-file? fullpath)
+            (malinka--error "Error in compile command detected.  \"%s\" is not a file" fullpath))
+          `(,(f-dirname fullpath) ,name))
       ;; else it's absolute
       `(,dir ,name))))
 
@@ -1105,7 +1160,7 @@ The given ATTRIBUTES-LIST is in the form: '(DEFINES INCLUDES ARGUMENTS)"
 
    ((s-starts-with? "-I" word)
     (let ((include-dir
-	   (s-chop-prefix "-I" word)))
+           (s-chop-prefix "-I" word)))
       (malinka--sublist-add-if-not-existing attributes-list 1 include-dir)))
 
    ((malinka--buildcmd-ignore-argument-p word)
@@ -1120,7 +1175,7 @@ The given ATTRIBUTES-LIST is in the form: '(DEFINES INCLUDES ARGUMENTS)"
 
 The returned compile attributes are in the form:
 '(DEFINES INCLUDES ARGUMENTS)"
-    (-reduce-from 'malinka--configoutput-process-word '(nil nil nil) words))
+  (-reduce-from 'malinka--configoutput-process-word '(nil nil nil) words))
 
 
 
@@ -1215,27 +1270,27 @@ Populates the project's `malinka--file-attributes' list."
 
 
 (defun malinka--read-project (prompt &optional default)
-"Select a malinka project from minibuffer with PROMPT.
+  "Select a malinka project from minibuffer with PROMPT.
 
 If DEFAULT is provided then this is shown as the default
 choice of a prompt.
 
 Returns the project as string or nil if not found."
-(let* ((candidates (malinka--defined-project-names))
-       (input (pcase malinka-completion-system
-                (`ido (ido-completing-read prompt candidates nil
-                                           'require-match default
-                                           'malinka--read-project-history
-                                           default))
-                (_ (completing-read prompt candidates nil 'require-match
-                                    default 'malinka--read-project-history
-                                    default)))))
-  (if (string= input "")
-      (user-error "No project name entered")
-    input)))
+  (let* ((candidates (malinka--defined-project-names))
+         (input (pcase malinka-completion-system
+                  (`ido (ido-completing-read prompt candidates nil
+                                             'require-match default
+                                             'malinka--read-project-history
+                                             default))
+                  (_ (completing-read prompt candidates nil 'require-match
+                                      default 'malinka--read-project-history
+                                      default)))))
+    (if (string= input "")
+        (user-error "No project name entered")
+      input)))
 
 
-; --- Interactive functions ---
+;; --- Interactive functions ---
 
 ;;;###autoload
 (defun malinka-project-configure (name given-root-dir)
