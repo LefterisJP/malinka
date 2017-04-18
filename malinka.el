@@ -842,21 +842,6 @@ EVENT is ignored."
 
 ;;; --- Rtags Integration ---
 
-(defun malinka--rtags-invoke-with (&rest args)
-  "Invoke rc (rtags executable) with ARGS as arguments.
-
-Returns the output of the command as a string or nil in case of error"
-  (when (malinka--rtags-assert-rdm-runs)
-    (let* ((rc (rtags-executable-find "rc"))
-           (cmd (s-join " " (cons rc args))))
-      (when rc
-        (shell-command-to-string cmd)))))
-
-(defun malinka--rtags-file-indexed-p (filename)
-  "Ask rtags if it knows about FILENAME."
-  (let ((output (s-trim (malinka--rtags-invoke-with "--is-indexed" filename))))
-    (string-equal output "indexed")))
-
 (defun malinka--rtags-assert-rdm-runs ()
   "Assert that the rtags daemon is running."
   ;; if the process has been messed with by outside sources clean it up
@@ -871,26 +856,6 @@ Returns the output of the command as a string or nil in case of error"
       t
     ;; else
     (malinka--error "Could not find rtags daemon in the system")))
-
-(defun malinka--rtags-is-indexing? ()
-  "Check if rtags is currently indexing anything"
-  (let ((result (string-to-number (malinka--rtags-invoke-with "--is-indexing"))))
-    (when (= result 1) t)))
-
-(defun malinka--rtags-project-loaded? (project)
-  "Check if rtags has loaded PROJECT."
-  (let* ((output (malinka--rtags-invoke-with "-w"))
-         (loadedlist (s-match "\\(.*\\) <=" output))
-         (dir (when loadedlist (nth 1 loadedlist))))
-    (when dir
-      (f-equal? dir (malinka--project-root-directory project)))))
-
-(defun malinka--rtags-project-known? (project)
-  "Check if rtags knows about PROJECT."
-  (let* ((output       (malinka--rtags-invoke-with "-w"))
-         (project-root (malinka--project-root-directory project))
-         (loadedlist (s-match (format "%s.*" project-root) output)))
-    loadedlist))
 
 (defun malinka--async-rtags-invoke-with (callback &rest args)
   "Invoke rc (rtags executable) with ARGS as arguments.
