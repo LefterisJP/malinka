@@ -644,15 +644,14 @@ ARGUMENTS are all the other compiler arguments for the file."
   (let ((files-list (malinka--project-files-list project)))
     ;; TODO Search if file is already in project and issue a warning
     (setf (malinka--project-files-list project)
-          (add-to-list 'files-list
-                       (make-malinka--file-attributes
-                        :name name
-                        :directory directory
-                        :executable executable
-                        :includes includes
-                        :defines defines
-                        :arguments arguments)))))
-
+          (push (make-malinka--file-attributes
+                 :name name
+                 :directory directory
+                 :executable executable
+                 :includes includes
+                 :defines defines
+                 :arguments arguments)
+                files-list))))
 
 (defun malinka--list-add-list-or-elem (list elem)
   "Add element to LIST.
