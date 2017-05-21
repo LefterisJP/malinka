@@ -282,6 +282,7 @@ If PROJECT is not known to Rtags, let Rtags know about it."
        (malinka--info
         "Rtags does not know about \"%s\". Informing it."
         (malinka--project-name project))
+       (malinka--watch-file-for-updates project)
        (malinka--project-create-or-select-compiledb project)))))
 
 ;;; --- Utility functions ---
@@ -459,7 +460,10 @@ If USER is t then it's a user error, otherwise it's an internal error."
   compile-cmd
   test-cmd
   run-cmd
-  files-list)
+  files-list
+  watch-file
+  watch-file-descriptor
+  renew-compile-commands-p)
 
 (cl-defstruct malinka--file-attributes
   name
@@ -553,7 +557,8 @@ If USER is t then it's a user error, otherwise it's an internal error."
                                      (compile-cmd nil)
                                      (compile-db-cmd nil)
                                      (test-cmd nil)
-                                     (run-cmd nil))
+                                     (run-cmd nil)
+                                     (watch-file nil))
   "Define a c/c++ project named NAME.
 
 Provide the ROOT-DIRECTORY of the project.
@@ -584,6 +589,8 @@ root directory.
 
 A project can also have a `run-cmd' which will be forwarded to projectile as the
 project's run command. Default keybinding: C-c p u.
+
+Project can be notified to rebuild the compile-commands file when `watch-file' changes.
 
 The project is added to the global `malinka--projects-map'"
   (condition-case-unless-debug nil
@@ -622,7 +629,10 @@ The project is added to the global `malinka--projects-map'"
                          :compile-cmd new-compile-cmd
                          :test-cmd new-test-cmd
                          :run-cmd run-cmd
-                         :files-list '())
+                         :files-list '()
+                         :watch-file watch-file
+                         :watch-file-descriptor nil
+                         :renew-compile-commands-p nil)
                    malinka--projects-map)))
     (error
      (malinka--warning-always
@@ -995,13 +1005,33 @@ http://clang.llvm.org/docs/JSONCompilationDatabase.html"
          (json-string (malinka--project-json-representation project-map)))
     (malinka--compiledb-write json-string db-file-name)))
 
+(defvar malinka--renew-compile-commands-file nil
+  "When this is t, `malinka--project-create-or-select-compiledb' will rebuild
+the compile_commands.json file instead of using the current one.")
+
+(defun malinka--watch-file-for-updates (project)
+  "Watch file for changes. If file changes update compile_commands.json file."
+  (unless (file-notify-valid-p (malinka--project-watch-file-descriptor project))
+    (when-let ((watch-file (malinka--project-watch-file project)))
+      (setf (malinka--project-watch-file-descriptor project)
+            (file-notify-add-watch
+             (expand-file-name watch-file) '(change)
+             (lambda (_event)
+               (malinka--info
+                "Watch file changed, schedule compile_commands to be rebuilt.")
+               (setf (malinka--project-renew-compile-commands-p project) t)))))))
+
 (defun malinka--project-create-or-select-compiledb (project)
   "Create or select if existing PROJECT's compilation database."
   (let* ((rootdir    (malinka--project-root-directory project))
          (builddir   (malinka--project-build-directory project))
+         (rebuild    (malinka--project-renew-compile-commands-p project))
          (rootcdb    (f-join rootdir "compile_commands.json"))
          (buildcdb   (f-join builddir "compile_commands.json")))
     (cond
+     (rebuild
+      (setf (malinka--project-renew-compile-commands-p project) nil)
+      (malinka--project-map-update-compiledb project))
      ((f-exists? rootcdb)
       (malinka--select-project rootdir))
      ((f-exists? buildcdb)
