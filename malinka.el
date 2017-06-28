@@ -269,6 +269,7 @@ If PROJECT is not known to Rtags, let Rtags know about it."
          (progn
            (malinka--debug "Rtags knows about \"%s\"."
                            (malinka--project-name project))
+           (malinka--watch-file-for-updates project)
            (malinka--async-rtags-project-loaded?
             project
             (lambda (project-loaded-p)
