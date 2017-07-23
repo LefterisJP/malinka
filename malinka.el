@@ -229,7 +229,9 @@ If `seconds' is nil or 0 then idle project check is disabled."
 Run each time `malinka-idle-project-check-seconds' have passed
  and `malinka-enable-idle-project-check' is non nil."
   (let ((buffer (current-buffer)))
-    (when (malinka--buffer-is-c? buffer)
+    (when (and
+           (malinka--enabled-in-buffer-? buffer)
+           (malinka--buffer-is-c? buffer))
       (let* ((filename (buffer-file-name buffer))
              (query (malinka--file-belongs-to-project filename)))
         (when query
@@ -382,6 +384,10 @@ Else return nil."
   (let ((mode (with-current-buffer buffer major-mode)))
     (or (string-equal mode "c++-mode") (string-equal mode "c-mode"))))
 
+(defun malinka--enabled-in-buffer-? (buffer)
+  "Checks if buffer has `malinka-mode' enabled."
+  (with-current-buffer buffer
+    (bound-and-true-p malinka-mode)))
 
 (defun malinka--string-list-p (obj)
   "Determine if OBJ is a list of strings.
