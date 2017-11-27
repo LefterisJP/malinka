@@ -1018,15 +1018,18 @@ the compile_commands.json file instead of using the current one.")
 
 (defun malinka--watch-file-for-updates (project)
   "Watch file for changes. If file changes update compile_commands.json file."
-  (unless (file-notify-valid-p (malinka--project-watch-file-descriptor project))
-    (when-let ((watch-file (malinka--project-watch-file project)))
-      (setf (malinka--project-watch-file-descriptor project)
-            (file-notify-add-watch
-             (expand-file-name watch-file) '(change)
-             (lambda (_event)
-               (malinka--info
-                "Watch file changed, schedule compile_commands to be rebuilt.")
-               (setf (malinka--project-renew-compile-commands-p project) t)))))))
+  (when (and (fboundp 'file-notify-valid-p)
+             (fboundp 'file-notify-add-watch))
+    (unless (file-notify-valid-p (malinka--project-watch-file-descriptor project))
+      (let ((watch-file (malinka--project-watch-file project)))
+        (when watch-file
+          (setf (malinka--project-watch-file-descriptor project)
+                (file-notify-add-watch
+                 (expand-file-name watch-file) '(change)
+                 (lambda (_event)
+                   (malinka--info
+                    "Watch file changed, schedule compile_commands to be rebuilt.")
+                   (setf (malinka--project-renew-compile-commands-p project) t)))))))))
 
 (defun malinka--project-create-or-select-compiledb (project)
   "Create or select if existing PROJECT's compilation database."
