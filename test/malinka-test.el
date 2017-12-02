@@ -1,12 +1,5 @@
-;;; test-malinka.el --- Unit tests for malinka.el
-;;
+;;; malinka-test.el --- Tests for malinka
 
-;;
-
-;;; Commentary:
-
-
-;;; Code:
 (require 'ert)
 (require 'malinka)
 
@@ -16,23 +9,23 @@
 (defvar malinka-test/root-dir (f-dirname (f-this-file)))
 
 (defun malinka-test-fail-explain/contained-lists-not-equal (a b)
-"Explain why A's and B's contained lists are not equal."
+  "Explain why A's and B's contained lists are not equal."
   (let* ((zipped (-zip-with '(lambda (l1 l2)
                                (if (-same-items? l1 l2) t `(,l1 ,l2)))
-                             a b))
+                            a b))
          (mismatch (--first (not (equal it t)) zipped)))
-  (format "Lists %s and %s are not equal"
-          (nth 0 mismatch) (nth 1 mismatch))))
+    (format "Lists %s and %s are not equal"
+            (nth 0 mismatch) (nth 1 mismatch))))
 
 (defun malinka-test-contained-lists-equal? (result-list exp-list)
-"Test if RESULT-LIST's and EXP-LIST's contained lists are not equal."
+  "Test if RESULT-LIST's and EXP-LIST's contained lists are not equal."
   (--all? (equal it t)
           (-zip-with '-same-items? exp-list result-list)))
 (put 'malinka-test-contained-lists-equal 'ert-explainer
      'malinka-test-fail-explain/contained-lists-not-equal)
 
 (defun malinka-test-assert-contained-lists-equal (result-list exp-list)
-"Assert that RESULT-LIST's and EXP-LIST's contained lists are equal."
+  "Assert that RESULT-LIST's and EXP-LIST's contained lists are equal."
   (should (malinka-test-contained-lists-equal? exp-list result-list)))
 
 (defun malinka-test-form-build-cmd (name f flags cpp-defines include-dirs)
@@ -49,7 +42,7 @@
 
 (defun malinka-test-turn-to-absolute (file)
   "Turn FILE into absolute path."
-    (f-join malinka-test/root-dir file))
+  (f-join malinka-test/root-dir file))
 
 
 ;; -- Test Malinka's utility functions
@@ -73,7 +66,7 @@
 
 ;; -- Test Malinka's makefile parsing related functions
 (defmacro malinka-test/setup-buildcmd-test-project (&rest commands)
-"Setup the environment for the test-project and execute COMMANDS.
+  "Setup the environment for the test-project and execute COMMANDS.
 
 This macro exposes the project map as 'map' and the root directory
 as 'root-dir' to the COMMANDS.  Afterwards it cleans up so the next
@@ -142,6 +135,4 @@ test can start with a clean project-map."
          ,(malinka-test-turn-to-absolute "test_project/boo.c")
          ,(malinka-test-turn-to-absolute "test_project/goo.c")))))))
 
-
-(provide 'test-malinka)
-;;; test-malinka.el ends here
+;;; malinka-test.el ends here

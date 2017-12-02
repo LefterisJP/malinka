@@ -179,7 +179,13 @@ and I will take a look at it when I find the time.
 
 * Contributions
 All contributions are welcome. If you would like to help you can open a pull request with your suggested contribution.
-
+** Running tests
+   #+begin_src sh :tangle yes
+   cask
+   make compile
+   make lint
+   make test
+   #+end_src
 ** Styling
 The malinka code is written in elisp and for styling we use the [elisp-formatter](https://www.emacswiki.org/emacs/ElispFormat) tool.
 If you make any contributions please make sure they adhere to the elisp style rules by also running it on your Pull Request.
